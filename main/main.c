@@ -1,25 +1,44 @@
 /*
- * ESP32-S3-CAM Optical Flow + TFMini LiDAR
- * Support OV2640 et OV5640 sélectionnable
- * 
- * Pour choisir la caméra, décommenter UNE seule ligne ci-dessous:
+ * ESP32-S3-CAM Optical Flow + LiDAR
+ * Support caméras: OV2640, OV5640, OV7725 (sélectionnable)
+ * Support lidars: TFMini, DTS6012M (sélectionnable)
+ *
+ * Pour choisir la caméra et le lidar, décommenter UNE seule ligne dans chaque section:
  */
 
 // ============================================================================
 // SÉLECTION DE LA CAMÉRA (décommenter UNE SEULE ligne)
 // ============================================================================
 //#define USE_OV2640  // Décommenter pour OV2640
-#define USE_OV5640  // Décommenter pour OV5640
+//#define USE_OV5640  // Décommenter pour OV5640
+#define USE_OV7725  // Décommenter pour OV7725 (optimisé vitesse)
 
 // ============================================================================
-// Vérification configuration
+// Vérification configuration caméra
 // ============================================================================
-#if defined(USE_OV2640) && defined(USE_OV5640)
-    #error "ERREUR: Sélectionnez OV2640 OU OV5640, pas les deux!"
+#if (defined(USE_OV2640) + defined(USE_OV5640) + defined(USE_OV7725)) > 1
+    #error "ERREUR: Sélectionnez UNE SEULE caméra!"
 #endif
 
-#if !defined(USE_OV2640) && !defined(USE_OV5640)
-    #error "ERREUR: Sélectionnez OV2640 ou OV5640 (décommentez une ligne)"
+#if !defined(USE_OV2640) && !defined(USE_OV5640) && !defined(USE_OV7725)
+    #error "ERREUR: Sélectionnez une caméra (décommentez une ligne)"
+#endif
+
+// ============================================================================
+// SÉLECTION DU LIDAR (décommenter UNE SEULE ligne)
+// ============================================================================
+//#define USE_TFMINI    // Décommenter pour TFMini (115200 baud)
+#define USE_DTS6012M  // Décommenter pour DTS6012M (921600 baud, haute vitesse)
+
+// ============================================================================
+// Vérification configuration lidar
+// ============================================================================
+#if (defined(USE_TFMINI) + defined(USE_DTS6012M)) > 1
+    #error "ERREUR: Sélectionnez UN SEUL lidar!"
+#endif
+
+#if !defined(USE_TFMINI) && !defined(USE_DTS6012M)
+    #error "ERREUR: Sélectionnez un lidar (décommentez une ligne)"
 #endif
 
 // ============================================================================
@@ -65,13 +84,22 @@ static const char *TAG = "OPTICAL_FLOW";
 #define CAM_PIN_PCLK    13
 
 // ============================================================================
-// Configuration UART TFMini
+// Configuration UART LiDAR
 // ============================================================================
-#define TFMINI_UART_NUM     UART_NUM_1
-#define TFMINI_TX_PIN       47
-#define TFMINI_RX_PIN       14
-#define TFMINI_BAUDRATE     115200
-#define TFMINI_BUF_SIZE     256
+#define LIDAR_UART_NUM     UART_NUM_1
+#define LIDAR_TX_PIN       47
+#define LIDAR_RX_PIN       14
+#define LIDAR_BUF_SIZE     512
+
+#ifdef USE_TFMINI
+    #define LIDAR_BAUDRATE     115200
+    #define LIDAR_MODEL        "TFMini"
+#endif
+
+#ifdef USE_DTS6012M
+    #define LIDAR_BAUDRATE     921600
+    #define LIDAR_MODEL        "DTS6012M"
+#endif
 
 // ============================================================================
 // Configuration spécifique selon la caméra
@@ -98,12 +126,27 @@ static const char *TAG = "OPTICAL_FLOW";
     #define IMG_WIDTH           160
     #define IMG_HEIGHT          120
     #define CAMERA_FRAME_SIZE   FRAMESIZE_QQVGA
-    #define XCLK_FREQ           40000000    // 24MHz
+    #define XCLK_FREQ           40000000    // 40MHz
     #define FOCAL_LENGTH_PX     40.27f      // À calibrer
     #define PIXEL_SIZE_MM       0.0014f     // 1.4µm
     #define FLOW_SMOOTHING_ALPHA      1.00f // Filtre léger (OV5640 moins bruité)
     #define MIN_GRADIENT_THRESHOLD    5.0f  // Seuil plus bas (meilleur SNR)
     #define MIN_VALID_PIXELS          120   // Moins de pixels requis
+#endif
+
+#ifdef USE_OV7725
+    // Configuration OV7725 (optimisée pour vitesse maximale)
+    #define CAMERA_MODEL        "OV7725"
+    #define CAMERA_PID          OV7725_PID
+    #define IMG_WIDTH           160
+    #define IMG_HEIGHT          120
+    #define CAMERA_FRAME_SIZE   FRAMESIZE_QQVGA
+    #define XCLK_FREQ           24000000    // 24MHz (optimal pour OV7725)
+    #define FOCAL_LENGTH_PX     45.0f       // À calibrer
+    #define PIXEL_SIZE_MM       0.006f      // 6µm (pixels plus grands = moins de bruit)
+    #define FLOW_SMOOTHING_ALPHA      1.00f // Pas de filtrage pour réactivité maximale
+    #define MIN_GRADIENT_THRESHOLD    6.0f  // Seuil modéré
+    #define MIN_VALID_PIXELS          100   // Moins de pixels pour vitesse
 #endif
 
 // ============================================================================
@@ -197,58 +240,59 @@ static void send_binary_packet(uint32_t timestamp_ms, float velocity_x, float ve
 }
 
 // ============================================================================
-// Initialisation UART TFMini
+// Initialisation UART LiDAR
 // ============================================================================
-static void init_tfmini_uart(void)
+static void init_lidar_uart(void)
 {
     uart_config_t uart_config = {
-        .baud_rate = TFMINI_BAUDRATE,
+        .baud_rate = LIDAR_BAUDRATE,
         .data_bits = UART_DATA_8_BITS,
         .parity = UART_PARITY_DISABLE,
         .stop_bits = UART_STOP_BITS_1,
         .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
         .source_clk = UART_SCLK_APB,
     };
-    
-    ESP_ERROR_CHECK(uart_driver_install(TFMINI_UART_NUM, TFMINI_BUF_SIZE * 2, 0, 0, NULL, 0));
-    ESP_ERROR_CHECK(uart_param_config(TFMINI_UART_NUM, &uart_config));
-    ESP_ERROR_CHECK(uart_set_pin(TFMINI_UART_NUM, TFMINI_TX_PIN, TFMINI_RX_PIN, 
+
+    ESP_ERROR_CHECK(uart_driver_install(LIDAR_UART_NUM, LIDAR_BUF_SIZE * 2, 0, 0, NULL, 0));
+    ESP_ERROR_CHECK(uart_param_config(LIDAR_UART_NUM, &uart_config));
+    ESP_ERROR_CHECK(uart_set_pin(LIDAR_UART_NUM, LIDAR_TX_PIN, LIDAR_RX_PIN,
                                   UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
-    
-    ESP_LOGI(TAG, "TFMini UART initialized");
+
+    ESP_LOGI(TAG, "%s UART initialized at %d baud", LIDAR_MODEL, LIDAR_BAUDRATE);
 }
 
 // ============================================================================
 // Lecture TFMini
 // ============================================================================
+#ifdef USE_TFMINI
 static void read_tfmini(void)
 {
     static uint8_t rx_buffer[9];
     static int rx_index = 0;
     uint8_t data;
-    
+
     int count = 0;
-    while (uart_read_bytes(TFMINI_UART_NUM, &data, 1, 0) > 0 && count++ < 20) {
+    while (uart_read_bytes(LIDAR_UART_NUM, &data, 1, 0) > 0 && count++ < 20) {
         rx_buffer[rx_index] = data;
-        
+
         if (rx_index == 0 && rx_buffer[0] != 0x59) continue;
         if (rx_index == 1 && rx_buffer[1] != 0x59) {
             rx_index = 0;
             continue;
         }
-        
+
         rx_index++;
-        
+
         if (rx_index == 9) {
             uint8_t checksum = 0;
             for (int i = 0; i < 8; i++) {
                 checksum += rx_buffer[i];
             }
-            
+
             if (rx_buffer[8] == (checksum & 0xFF)) {
                 uint16_t dist = rx_buffer[2] | (rx_buffer[3] << 8);
                 uint16_t strength = rx_buffer[4] | (rx_buffer[5] << 8);
-                
+
                 if (dist > 0 && dist <= MAX_VALID_DISTANCE_CM) {
                     lidar_data.distance = dist;
                     lidar_data.strength = strength;
@@ -257,11 +301,77 @@ static void read_tfmini(void)
                     lidar_data.valid = false;
                 }
             }
-            
+
             rx_index = 0;
             break;
         }
     }
+}
+#endif
+
+// ============================================================================
+// Lecture DTS6012M
+// ============================================================================
+#ifdef USE_DTS6012M
+static void read_dts6012m(void)
+{
+    static uint8_t rx_buffer[15];
+    static int rx_index = 0;
+    uint8_t data;
+
+    int count = 0;
+    while (uart_read_bytes(LIDAR_UART_NUM, &data, 1, 0) > 0 && count++ < 50) {
+        rx_buffer[rx_index] = data;
+
+        // Recherche header 0xAA 0x55
+        if (rx_index == 0 && rx_buffer[0] != 0xAA) continue;
+        if (rx_index == 1 && rx_buffer[1] != 0x55) {
+            rx_index = 0;
+            continue;
+        }
+
+        rx_index++;
+
+        // Paquet complet: 15 octets
+        // [0xAA 0x55][dist_L dist_H][int_L int_H][dist2_L dist2_H][int2_L int2_H][temp_L temp_H][status][crc_L crc_H]
+        if (rx_index == 15) {
+            // CRC-16 CCITT validation (optionnel pour performance)
+            // Pour vitesse maximale, on peut sauter la vérification CRC
+
+            uint16_t dist_primary = rx_buffer[2] | (rx_buffer[3] << 8);
+            uint16_t intensity_primary = rx_buffer[4] | (rx_buffer[5] << 8);
+            uint8_t status = rx_buffer[12];
+
+            // Le DTS6012M retourne la distance en millimètres, convertir en cm
+            dist_primary /= 10;
+
+            // Status byte: bit 0 = valid measurement
+            if ((status & 0x01) && dist_primary > 0 && dist_primary <= MAX_VALID_DISTANCE_CM) {
+                lidar_data.distance = dist_primary;
+                lidar_data.strength = intensity_primary;
+                lidar_data.valid = true;
+            } else {
+                lidar_data.valid = false;
+            }
+
+            rx_index = 0;
+            break;
+        }
+    }
+}
+#endif
+
+// ============================================================================
+// Lecture LiDAR (appelle la fonction appropriée)
+// ============================================================================
+static inline void read_lidar(void)
+{
+#ifdef USE_TFMINI
+    read_tfmini();
+#endif
+#ifdef USE_DTS6012M
+    read_dts6012m();
+#endif
 }
 
 // ============================================================================
@@ -393,9 +503,9 @@ static esp_err_t init_camera(void)
     // Vérifier que le bon capteur est détecté
     if (s->id.PID != CAMERA_PID) {
         ESP_LOGW(TAG, "Camera PID mismatch! Expected 0x%x, got 0x%x", CAMERA_PID, s->id.PID);
-        ESP_LOGW(TAG, "Vérifiez que USE_OV2640 ou USE_OV5640 correspond à votre caméra");
+        ESP_LOGW(TAG, "Vérifiez que USE_OV2640, USE_OV5640 ou USE_OV7725 correspond à votre caméra");
     }
-    
+
     // Configuration commune
     s->set_vflip(s, 0);
     s->set_hmirror(s, 0);
@@ -410,7 +520,7 @@ static esp_err_t init_camera(void)
     s->set_bpc(s, 0);
     s->set_wpc(s, 0);
     s->set_lenc(s, 0);
-    
+
     // Configuration spécifique OV2640
     #ifdef USE_OV2640
     if (s->id.PID == OV2640_PID) {
@@ -419,11 +529,29 @@ static esp_err_t init_camera(void)
         ESP_LOGI(TAG, "OV2640 configured");
     }
     #endif
-    
-    // Configuration spécifique OV5640 (si nécessaire)
+
+    // Configuration spécifique OV5640
     #ifdef USE_OV5640
     if (s->id.PID == OV5640_PID) {
         ESP_LOGI(TAG, "OV5640 configured");
+    }
+    #endif
+
+    // Configuration spécifique OV7725 (optimisée pour vitesse)
+    #ifdef USE_OV7725
+    if (s->id.PID == OV7725_PID) {
+        // OV7725 optimisations pour framerate maximal
+        s->set_brightness(s, 0);      // Brightness neutre
+        s->set_contrast(s, 0);        // Contrast neutre
+        s->set_saturation(s, 0);      // Saturation neutre (N&B)
+        s->set_special_effect(s, 0);  // Pas d'effets spéciaux
+        s->set_colorbar(s, 0);        // Pas de colorbar
+
+        // Désactiver tous les traitements pour vitesse maximale
+        s->set_raw_gma(s, 0);         // Pas de gamma correction
+        s->set_dcw(s, 0);             // Pas de downsize
+
+        ESP_LOGI(TAG, "OV7725 configured for maximum speed");
     }
     #endif
     
@@ -508,12 +636,13 @@ static void camera_task(void *pvParameters)
 static void lidar_serial_task(void *pvParameters)
 {
     ESP_LOGI(TAG, "LiDAR/Serial task started on core %d", xPortGetCoreID());
-    
+
     sensor_data_t data;
-    
+
     printf("\n=================================\n");
-    printf("ESP32-S3-CAM + TFMini LiDAR\n");
+    printf("ESP32-S3-CAM Optical Flow System\n");
     printf("Camera: %s\n", CAMERA_MODEL);
+    printf("LiDAR: %s\n", LIDAR_MODEL);
     printf("Resolution: %dx%d\n", IMG_WIDTH, IMG_HEIGHT);
     printf("XCLK: %d MHz\n", XCLK_FREQ / 1000000);
     printf("Pixel size: %.4f mm\n", PIXEL_SIZE_MM);
@@ -522,18 +651,18 @@ static void lidar_serial_task(void *pvParameters)
     printf("Binary Protocol Mode\n");
     printf("Packet: [0xAA 0x55][ts(4)][vx(2)][vy(2)][dist(2)][chk(1)]\n");
     printf("Starting transmission...\n\n");
-    
+
     vTaskDelay(pdMS_TO_TICKS(500));
-    
+
     while (1) {
-        read_tfmini();
-        
+        read_lidar();
+
         if (xQueueReceive(dataQueue, &data, pdMS_TO_TICKS(10)) == pdTRUE) {
             uint32_t timestamp_ms = (uint32_t)(data.timestamp / 1000);
-            send_binary_packet(timestamp_ms, data.velocity_x, data.velocity_y, 
+            send_binary_packet(timestamp_ms, data.velocity_x, data.velocity_y,
                              data.lidar_valid ? data.distance : 0);
         }
-        
+
         vTaskDelay(pdMS_TO_TICKS(1));
     }
 }
@@ -558,9 +687,9 @@ void app_main(void)
     }
     
     ESP_LOGI(TAG, "Memory allocated");
-    
-    init_tfmini_uart();
-    
+
+    init_lidar_uart();
+
     frameMutex = xSemaphoreCreateMutex();
     dataQueue = xQueueCreate(20, sizeof(sensor_data_t));
     
