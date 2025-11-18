@@ -1,0 +1,103 @@
+# sdkconfig.defaults - Configuration optimale pour performance
+
+# ============================================================================
+# ESP32 Configuration
+# ============================================================================
+CONFIG_ESP32_DEFAULT_CPU_FREQ_240=y
+CONFIG_ESP32_DEFAULT_CPU_FREQ_MHZ=240
+
+# ============================================================================
+# PSRAM Configuration
+# ============================================================================
+CONFIG_ESP32_SPIRAM_SUPPORT=y
+CONFIG_SPIRAM_USE_MALLOC=y
+CONFIG_SPIRAM_TYPE_AUTO=y
+CONFIG_SPIRAM_SIZE=4194304
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_CACHE_WORKAROUND=y
+CONFIG_SPIRAM_BANKSWITCH_ENABLE=y
+
+# Optimisation DMA PSRAM
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384
+CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=32768
+
+# ============================================================================
+# Camera Configuration
+# ============================================================================
+CONFIG_OV5640_SUPPORT=y
+CONFIG_CAMERA_CORE0=n
+CONFIG_CAMERA_CORE1=y
+CONFIG_SCCB_HARDWARE_I2C_PORT1=y
+
+# ============================================================================
+# FreeRTOS Configuration
+# ============================================================================
+CONFIG_FREERTOS_HZ=1000
+CONFIG_FREERTOS_UNICORE=n
+CONFIG_FREERTOS_USE_TICKLESS_IDLE=n
+CONFIG_FREERTOS_IDLE_TASK_STACKSIZE=1536
+
+# Task watchdog
+CONFIG_ESP_TASK_WDT=y
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=10
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0=n
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1=n
+
+# ============================================================================
+# Compiler Optimizations
+# ============================================================================
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
+CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_SILENT=y
+
+# ============================================================================
+# UART Configuration
+# ============================================================================
+CONFIG_UART_ISR_IN_IRAM=y
+
+# ============================================================================
+# Log Configuration (réduire pour performance)
+# ============================================================================
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+CONFIG_LOG_MAXIMUM_LEVEL_INFO=y
+CONFIG_BOOTLOADER_LOG_LEVEL_WARN=y
+
+# ============================================================================
+# Flash Configuration
+# ============================================================================
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+
+# Partition scheme
+CONFIG_PARTITION_TABLE_CUSTOM=n
+CONFIG_PARTITION_TABLE_SINGLE_APP_LARGE=y
+
+# ============================================================================
+# Power Management (désactiver pour performance max)
+# ============================================================================
+CONFIG_PM_ENABLE=n
+
+# ============================================================================
+# Brownout Detector (désactivé dans code mais backup ici)
+# ============================================================================
+CONFIG_ESP32_BROWNOUT_DET=n
+
+# ============================================================================
+# Stack overflow detection (désactiver en production)
+# ============================================================================
+CONFIG_FREERTOS_WATCHPOINT_END_OF_STACK=n
+
+# ============================================================================
+# Memory optimizations
+# ============================================================================
+CONFIG_ESP32_WIFI_CACHE_TX_BUFFER_NUM=16
+CONFIG_LWIP_MAX_SOCKETS=4
+CONFIG_LWIP_TCP_RECVMBOX_SIZE=6
+CONFIG_LWIP_UDP_RECVMBOX_SIZE=6
+
+# ============================================================================
+# Bootloader optimization
+# ============================================================================
+CONFIG_BOOTLOADER_COMPILER_OPTIMIZATION_SIZE=y
+CONFIG_BOOTLOADER_LOG_LEVEL_WARN=y

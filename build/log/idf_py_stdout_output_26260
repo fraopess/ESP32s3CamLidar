@@ -1,0 +1,275 @@
+Command: ninja flash
+[1/10] Creating directories for 'bootloader'
+[2/10] No download step for 'bootloader'
+[3/10] No update step for 'bootloader'
+[4/10] No patch step for 'bootloader'
+[5/10] cd /home/fra/workspace-idf/ClaudeESP32s3CamTFMini/build && /home/fra/.espressif/python_env/idf6.0_py3.13_env/bin/python /home/fra/workspace-idf/esp-idf/components/partition_table/check_sizes.py --offset 0x8000 partition --type app /home/fra/workspace-idf/ClaudeESP32s3CamTFMini/build/partition_table/partition-table.bin /home/fra/workspace-idf/ClaudeESP32s3CamTFMini/build/optical_flow_lidar.bin
+optical_flow_lidar.bin binary size 0x49850 bytes. Smallest app partition is 0x177000 bytes. 0x12d7b0 bytes (80%) free.
+[6/10] Performing configure step for 'bootloader'
+-- Found Git: /usr/bin/git (found version "2.48.1")
+-- Component directory /home/fra/workspace-idf/esp-idf/components/json does not contain a CMakeLists.txt file. No component will be added
+-- Minimal build - OFF
+-- The C compiler identification is GNU 15.2.0
+-- The CXX compiler identification is GNU 15.2.0
+-- The ASM compiler identification is GNU
+-- Found assembler: /home/fra/.espressif/tools/xtensa-esp-elf/esp-15.2.0_20250929/xtensa-esp-elf/bin/xtensa-esp32s3-elf-gcc
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /home/fra/.espressif/tools/xtensa-esp-elf/esp-15.2.0_20250929/xtensa-esp-elf/bin/xtensa-esp32s3-elf-gcc - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /home/fra/.espressif/tools/xtensa-esp-elf/esp-15.2.0_20250929/xtensa-esp-elf/bin/xtensa-esp32s3-elf-g++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Building ESP-IDF components for target esp32s3
+-- ESP-TEE is currently supported only on the esp32c6;esp32h2;esp32c5 SoCs
+-- Project sdkconfig file /home/fra/workspace-idf/ClaudeESP32s3CamTFMini/sdkconfig
+info: Default value for ESP_SLEEP_PSRAM_LEAKAGE_WORKAROUND in sdkconfig is [1my[0m but it is [1mn[0m according to Kconfig.
+Using default value from sdkconfig ([1my[0m).
+info: Default value for ESP_PERIPH_CTRL_FUNC_IN_IRAM in sdkconfig is [1my[0m but it is [1mn[0m according to Kconfig.
+Using default value from sdkconfig ([1my[0m).
+info: Default value for GDMA_CTRL_FUNC_IN_IRAM in sdkconfig is [1my[0m but it is [1mn[0m according to Kconfig.
+Using default value from sdkconfig ([1my[0m).
+info: Default value for FREERTOS_TASK_CREATE_ALLOW_EXT_MEM in sdkconfig is [1my[0m but it is [1mn[0m according to Kconfig.
+Using default value from sdkconfig ([1my[0m).
+[1mConfiguration Report                                                            [0m
+ ────────────────────────────────────────────────────────────────────────────── 
+   Parser Version: 1                                                            
+   Verbosity: default                                                           
+   Defaults policy: sdkconfig                                                   
+  [38;5;154m [0m[38;5;154mStatus: Finished with notifications[0m[38;5;154m [0m                                         
+                                                                                
+  [1;34mMiscellaneous                                                               [0m  
+   ──────────────────────────────────────────────────────────────────────────   
+    * Trying to set symbol ESP32S3_DATA_CACHE_32KB to n, but it is currently    
+    selected by choice ESP32S3_DATA_CACHE_SIZE. For setting it to n, set        
+    another choice symbol to y instead.                                         
+    * Trying to set symbol PARTITION_TABLE_SINGLE_APP to n, but it is           
+    currently selected by choice PARTITION_TABLE_TYPE. For setting it to n,     
+    set another choice symbol to y instead.                                     
+    * Trying to set symbol ESP32S3_INSTRUCTION_CACHE_16KB to n, but it is       
+    currently selected by choice ESP32S3_INSTRUCTION_CACHE_SIZE. For setting    
+    it to n, set another choice symbol to y instead.                            
+    * Trying to set symbol ESP32S3_DATA_CACHE_LINE_32B to n, but it is          
+    currently selected by choice ESP32S3_DATA_CACHE_LINE_SIZE. For setting      
+    it to n, set another choice symbol to y instead.                            
+    * Trying to set symbol COMPILER_OPTIMIZATION_DEBUG to n, but it is          
+    currently selected by choice COMPILER_OPTIMIZATION. For setting it to n,    
+    set another choice symbol to y instead.                                     
+    * Trying to set symbol ESP_DEFAULT_CPU_FREQ_MHZ_160 to n, but it is         
+    currently selected by choice ESP_DEFAULT_CPU_FREQ_MHZ. For setting it to    
+    n, set another choice symbol to y instead.                                  
+    * Trying to set symbol COMPILER_OPTIMIZATION_ASSERTIONS_ENABLE to n, but    
+    it is currently selected by choice                                          
+    COMPILER_OPTIMIZATION_ASSERTION_LEVEL. For setting it to n, set another     
+    choice symbol to y instead.                                                 
+    * Trying to set symbol ESPTOOLPY_FLASHSIZE_2MB to n, but it is currently    
+    selected by choice ESPTOOLPY_FLASHSIZE. For setting it to n, set another    
+    choice symbol to y instead.                                                 
+   ──────────────────────────────────────────────────────────────────────────   
+  [1;34mDefault Value Mismatch                                                      [0m  
+   ──────────────────────────────────────────────────────────────────────────   
+   [3m [0m[3mUsing sdkconfig default values                                       [0m[3m [0m [3m  [0m   
+   [1m [0m[1mChoice symbols with different default selection between sdkconfig and[0m[1m [0m [1m  [0m   
+   [1m [0m[1mKconfig                                                              [0m[1m [0m [1m  [0m   
+    LIBC_STDIN_LINE_ENDING: Kconfig default selection: choice deselected,       
+    sdkconfig default selection: LIBC_STDIN_LINE_ENDING_CR                      
+    LIBC_STDOUT_LINE_ENDING: Kconfig default selection: choice                  
+    deselected, sdkconfig default selection: LIBC_STDOUT_LINE_ENDING_CRLF       
+   ──────────────────────────────────────────────────────────────────────────   
+ ────────────────────────────────────────────────────────────────────────────── 
+-- Compiler supported targets: xtensa-esp-elf
+-- Adding linker script /home/fra/workspace-idf/esp-idf/components/soc/esp32s3/ld/esp32s3.peripherals.ld
+-- Bootloader project name: "bootloader" version: 1
+-- Adding linker script /home/fra/workspace-idf/esp-idf/components/esp_rom/esp32s3/ld/esp32s3.rom.ld
+-- Adding linker script /home/fra/workspace-idf/esp-idf/components/esp_rom/esp32s3/ld/esp32s3.rom.api.ld
+-- Adding linker script /home/fra/workspace-idf/esp-idf/components/esp_rom/esp32s3/ld/esp32s3.rom.bt_funcs.ld
+-- Adding linker script /home/fra/workspace-idf/esp-idf/components/esp_rom/esp32s3/ld/esp32s3.rom.libgcc.ld
+-- Adding linker script /home/fra/workspace-idf/esp-idf/components/esp_rom/esp32s3/ld/esp32s3.rom.wdt.ld
+-- Adding linker script /home/fra/workspace-idf/esp-idf/components/esp_rom/esp32s3/ld/esp32s3.rom.version.ld
+-- Adding linker script /home/fra/workspace-idf/esp-idf/components/esp_rom/esp32s3/ld/esp32s3.rom.libc.ld
+-- Adding linker script /home/fra/workspace-idf/esp-idf/components/esp_rom/esp32s3/ld/esp32s3.rom.newlib.ld
+-- Adding linker script /home/fra/workspace-idf/esp-idf/components/bootloader/subproject/main/ld/esp32s3/bootloader.rom.ld
+-- Components: bootloader bootloader_support efuse esp_app_format esp_bootloader_format esp_common esp_hal_dma esp_hal_mspi esp_hal_timg esp_hal_wdt esp_hw_support esp_libc esp_rom esp_stdio esp_system esptool_py freertos hal log main micro-ecc partition_table soc spi_flash xtensa
+-- Component paths: /home/fra/workspace-idf/esp-idf/components/bootloader /home/fra/workspace-idf/esp-idf/components/bootloader_support /home/fra/workspace-idf/esp-idf/components/efuse /home/fra/workspace-idf/esp-idf/components/esp_app_format /home/fra/workspace-idf/esp-idf/components/esp_bootloader_format /home/fra/workspace-idf/esp-idf/components/esp_common /home/fra/workspace-idf/esp-idf/components/esp_hal_dma /home/fra/workspace-idf/esp-idf/components/esp_hal_mspi /home/fra/workspace-idf/esp-idf/components/esp_hal_timg /home/fra/workspace-idf/esp-idf/components/esp_hal_wdt /home/fra/workspace-idf/esp-idf/components/esp_hw_support /home/fra/workspace-idf/esp-idf/components/esp_libc /home/fra/workspace-idf/esp-idf/components/esp_rom /home/fra/workspace-idf/esp-idf/components/esp_stdio /home/fra/workspace-idf/esp-idf/components/esp_system /home/fra/workspace-idf/esp-idf/components/esptool_py /home/fra/workspace-idf/esp-idf/components/freertos /home/fra/workspace-idf/esp-idf/components/hal /home/fra/workspace-idf/esp-idf/components/log /home/fra/workspace-idf/esp-idf/components/bootloader/subproject/main /home/fra/workspace-idf/esp-idf/components/bootloader/subproject/components/micro-ecc /home/fra/workspace-idf/esp-idf/components/partition_table /home/fra/workspace-idf/esp-idf/components/soc /home/fra/workspace-idf/esp-idf/components/spi_flash /home/fra/workspace-idf/esp-idf/components/xtensa
+-- Adding linker script /home/fra/workspace-idf/esp-idf/components/bootloader/subproject/main/ld/esp32s3/bootloader.ld.in
+--   -> Preprocessing .in script: /home/fra/workspace-idf/esp-idf/components/bootloader/subproject/main/ld/esp32s3/bootloader.ld.in
+-- Configuring done (5.6s)
+-- Generating done (0.1s)
+-- Build files have been written to: /home/fra/workspace-idf/ClaudeESP32s3CamTFMini/build/bootloader
+[7/10] Performing build step for 'bootloader'
+[1/129] Building C object esp-idf/log/CMakeFiles/__idf_log.dir/src/noos/util.c.obj
+[2/129] Building C object esp-idf/log/CMakeFiles/__idf_log.dir/src/util.c.obj
+[3/129] Building C object esp-idf/log/CMakeFiles/__idf_log.dir/src/noos/log_lock.c.obj
+[4/129] Building C object esp-idf/log/CMakeFiles/__idf_log.dir/src/log_timestamp_common.c.obj
+[5/129] Building C object esp-idf/log/CMakeFiles/__idf_log.dir/src/noos/log_timestamp.c.obj
+[6/129] Building C object esp-idf/log/CMakeFiles/__idf_log.dir/src/log_print.c.obj
+[7/129] Building C object esp-idf/log/CMakeFiles/__idf_log.dir/src/buffer/log_buffers.c.obj
+[8/129] Building C object esp-idf/esp_rom/CMakeFiles/__idf_esp_rom.dir/patches/esp_rom_crc.c.obj
+[9/129] Building C object esp-idf/log/CMakeFiles/__idf_log.dir/src/log_format_text.c.obj
+[10/129] Building C object esp-idf/log/CMakeFiles/__idf_log.dir/src/log.c.obj
+[11/129] Building C object esp-idf/esp_rom/CMakeFiles/__idf_esp_rom.dir/patches/esp_rom_sys.c.obj
+[12/129] Building C object esp-idf/esp_rom/CMakeFiles/__idf_esp_rom.dir/patches/esp_rom_efuse.c.obj
+[13/129] Building C object esp-idf/esp_rom/CMakeFiles/__idf_esp_rom.dir/patches/esp_rom_gpio.c.obj
+[14/129] Building ASM object esp-idf/esp_rom/CMakeFiles/__idf_esp_rom.dir/patches/esp_rom_longjmp.S.obj
+[15/129] Building ASM object esp-idf/esp_rom/CMakeFiles/__idf_esp_rom.dir/patches/esp_rom_cache_writeback_esp32s3.S.obj
+[16/129] Building C object esp-idf/esp_rom/CMakeFiles/__idf_esp_rom.dir/patches/esp_rom_spiflash.c.obj
+[17/129] Building C object esp-idf/esp_rom/CMakeFiles/__idf_esp_rom.dir/patches/esp_rom_serial_output.c.obj
+[18/129] Building C object esp-idf/esp_rom/CMakeFiles/__idf_esp_rom.dir/patches/esp_rom_systimer.c.obj
+[19/129] Linking C static library esp-idf/log/liblog.a
+[20/129] Building C object esp-idf/esp_rom/CMakeFiles/__idf_esp_rom.dir/patches/esp_rom_cache_esp32s2_esp32s3.c.obj
+[21/129] Building C object esp-idf/esp_common/CMakeFiles/__idf_esp_common.dir/src/esp_err_to_name.c.obj
+[22/129] Building C object esp-idf/esp_hw_support/CMakeFiles/__idf_esp_hw_support.dir/port/esp32s3/esp_cpu_intr.c.obj
+[23/129] Building C object esp-idf/esp_hw_support/CMakeFiles/__idf_esp_hw_support.dir/cpu.c.obj
+[24/129] Building C object esp-idf/esp_hw_support/CMakeFiles/__idf_esp_hw_support.dir/esp_memory_utils.c.obj
+[25/129] Building C object esp-idf/esp_hw_support/CMakeFiles/__idf_esp_hw_support.dir/port/esp32s3/cpu_region_protect.c.obj
+[26/129] Building C object esp-idf/esp_rom/CMakeFiles/__idf_esp_rom.dir/patches/esp_rom_print.c.obj
+[27/129] Linking C static library esp-idf/esp_rom/libesp_rom.a
+[28/129] Building C object esp-idf/esp_hw_support/CMakeFiles/__idf_esp_hw_support.dir/port/esp32s3/chip_info.c.obj
+[29/129] Linking C static library esp-idf/esp_common/libesp_common.a
+[30/129] Building C object esp-idf/esp_hw_support/CMakeFiles/__idf_esp_hw_support.dir/port/esp32s3/rtc_clk_init.c.obj
+[31/129] Building C object esp-idf/esp_system/CMakeFiles/__idf_esp_system.dir/esp_err.c.obj
+[32/129] Building C object esp-idf/esp_hw_support/CMakeFiles/__idf_esp_hw_support.dir/port/esp32s3/rtc_sleep.c.obj
+[33/129] Building C object esp-idf/esp_hw_support/CMakeFiles/__idf_esp_hw_support.dir/port/esp32s3/rtc_init.c.obj
+[34/129] Building C object esp-idf/esp_hw_support/CMakeFiles/__idf_esp_hw_support.dir/port/esp32s3/rtc_clk.c.obj
+[35/129] Building C object esp-idf/efuse/CMakeFiles/__idf_efuse.dir/esp32s3/esp_efuse_table.c.obj
+[36/129] Building C object esp-idf/efuse/CMakeFiles/__idf_efuse.dir/esp32s3/esp_efuse_rtc_calib.c.obj
+[37/129] Building C object esp-idf/efuse/CMakeFiles/__idf_efuse.dir/esp32s3/esp_efuse_fields.c.obj
+[38/129] Building C object esp-idf/esp_hw_support/CMakeFiles/__idf_esp_hw_support.dir/port/esp32s3/rtc_time.c.obj
+[39/129] Linking C static library esp-idf/esp_hw_support/libesp_hw_support.a
+[40/129] Linking C static library esp-idf/esp_system/libesp_system.a
+[41/129] Building C object esp-idf/efuse/CMakeFiles/__idf_efuse.dir/src/esp_efuse_fields.c.obj
+[42/129] Building C object esp-idf/efuse/CMakeFiles/__idf_efuse.dir/esp32s3/esp_efuse_utility.c.obj
+[43/129] Building C object esp-idf/efuse/CMakeFiles/__idf_efuse.dir/src/esp_efuse_api.c.obj
+[44/129] Building C object esp-idf/bootloader_support/CMakeFiles/__idf_bootloader_support.dir/src/bootloader_clock_init.c.obj
+[45/129] Building C object esp-idf/bootloader_support/CMakeFiles/__idf_bootloader_support.dir/src/bootloader_common_loader.c.obj
+[46/129] Building C object esp-idf/bootloader_support/CMakeFiles/__idf_bootloader_support.dir/src/bootloader_random.c.obj
+[47/129] Building C object esp-idf/bootloader_support/CMakeFiles/__idf_bootloader_support.dir/src/bootloader_mem.c.obj
+[48/129] Building C object esp-idf/bootloader_support/CMakeFiles/__idf_bootloader_support.dir/src/bootloader_efuse.c.obj
+[49/129] Building C object esp-idf/bootloader_support/CMakeFiles/__idf_bootloader_support.dir/src/bootloader_common.c.obj
+[50/129] Building C object esp-idf/bootloader_support/CMakeFiles/__idf_bootloader_support.dir/src/flash_encrypt.c.obj
+[51/129] Building C object esp-idf/efuse/CMakeFiles/__idf_efuse.dir/src/efuse_controller/keys/with_key_purposes/esp_efuse_api_key.c.obj
+[52/129] Building C object esp-idf/efuse/CMakeFiles/__idf_efuse.dir/src/esp_efuse_utility.c.obj
+[53/129] Building C object esp-idf/bootloader_support/CMakeFiles/__idf_bootloader_support.dir/src/secure_boot.c.obj
+[54/129] Building C object esp-idf/bootloader_support/CMakeFiles/__idf_bootloader_support.dir/bootloader_flash/src/flash_qio_mode.c.obj
+[55/129] Building C object esp-idf/bootloader_support/CMakeFiles/__idf_bootloader_support.dir/src/flash_partitions.c.obj
+[56/129] Building C object esp-idf/bootloader_support/CMakeFiles/__idf_bootloader_support.dir/src/bootloader_random_esp32s3.c.obj
+[57/129] Building C object esp-idf/bootloader_support/CMakeFiles/__idf_bootloader_support.dir/bootloader_flash/src/bootloader_flash_config_esp32s3.c.obj
+[58/129] Building C object esp-idf/bootloader_support/CMakeFiles/__idf_bootloader_support.dir/src/bootloader_sha.c.obj
+[59/129] Building C object esp-idf/bootloader_support/CMakeFiles/__idf_bootloader_support.dir/src/bootloader_clock_loader.c.obj
+[60/129] Building C object esp-idf/bootloader_support/CMakeFiles/__idf_bootloader_support.dir/bootloader_flash/src/bootloader_flash.c.obj
+[61/129] Building C object esp-idf/bootloader_support/CMakeFiles/__idf_bootloader_support.dir/src/bootloader_init.c.obj
+[62/129] Building C object esp-idf/bootloader_support/CMakeFiles/__idf_bootloader_support.dir/src/bootloader_console_loader.c.obj
+[63/129] Building C object esp-idf/bootloader_support/CMakeFiles/__idf_bootloader_support.dir/src/bootloader_console.c.obj
+[64/129] Linking C static library esp-idf/efuse/libefuse.a
+[65/129] Building C object esp-idf/esp_hal_wdt/CMakeFiles/__idf_esp_hal_wdt.dir/esp32s3/mwdt_periph.c.obj
+[66/129] Building C object esp-idf/bootloader_support/CMakeFiles/__idf_bootloader_support.dir/src/esp32s3/bootloader_soc.c.obj
+[67/129] Building C object esp-idf/bootloader_support/CMakeFiles/__idf_bootloader_support.dir/src/bootloader_utility.c.obj
+[68/129] Building C object esp-idf/bootloader_support/CMakeFiles/__idf_bootloader_support.dir/src/bootloader_panic.c.obj
+[69/129] Building C object esp-idf/esp_hal_timg/CMakeFiles/__idf_esp_hal_timg.dir/esp32s3/timer_periph.c.obj
+[70/129] Building C object esp-idf/esp_hal_wdt/CMakeFiles/__idf_esp_hal_wdt.dir/rom_patch.c.obj
+[71/129] Building C object esp-idf/esp_hal_wdt/CMakeFiles/__idf_esp_hal_wdt.dir/xt_wdt_hal.c.obj
+[72/129] Building C object esp-idf/esp_hal_timg/CMakeFiles/__idf_esp_hal_timg.dir/timer_hal.c.obj
+[73/129] Building C object esp-idf/bootloader_support/CMakeFiles/__idf_bootloader_support.dir/src/esp_image_format.c.obj
+[74/129] Building C object esp-idf/esp_bootloader_format/CMakeFiles/__idf_esp_bootloader_format.dir/esp_bootloader_desc.c.obj
+[75/129] Building C object esp-idf/esp_hal_dma/CMakeFiles/__idf_esp_hal_dma.dir/esp32s3/gdma_periph.c.obj
+[76/129] Building C object esp-idf/bootloader_support/CMakeFiles/__idf_bootloader_support.dir/src/esp32s3/bootloader_esp32s3.c.obj
+[77/129] Building C object esp-idf/spi_flash/CMakeFiles/__idf_spi_flash.dir/spi_flash_wrap.c.obj
+[78/129] Building C object esp-idf/esp_hal_dma/CMakeFiles/__idf_esp_hal_dma.dir/gdma_hal_top.c.obj
+[79/129] Linking C static library esp-idf/bootloader_support/libbootloader_support.a
+[80/129] Linking C static library esp-idf/esp_hal_wdt/libesp_hal_wdt.a
+[81/129] Linking C static library esp-idf/esp_hal_timg/libesp_hal_timg.a
+[82/129] Building C object esp-idf/hal/CMakeFiles/__idf_hal.dir/hal_utils.c.obj
+[83/129] Linking C static library esp-idf/esp_bootloader_format/libesp_bootloader_format.a
+[84/129] Building C object esp-idf/hal/CMakeFiles/__idf_hal.dir/mpu_hal.c.obj
+[85/129] Linking C static library esp-idf/spi_flash/libspi_flash.a
+[86/129] Building C object esp-idf/esp_hal_dma/CMakeFiles/__idf_esp_hal_dma.dir/gdma_hal_ahb_v1.c.obj
+[87/129] Building C object esp-idf/hal/CMakeFiles/__idf_hal.dir/efuse_hal.c.obj
+[88/129] Building C object esp-idf/soc/CMakeFiles/__idf_soc.dir/dport_access_common.c.obj
+[89/129] Building C object esp-idf/hal/CMakeFiles/__idf_hal.dir/esp32s3/efuse_hal.c.obj
+[90/129] Building C object esp-idf/soc/CMakeFiles/__idf_soc.dir/lldesc.c.obj
+[91/129] Building C object esp-idf/hal/CMakeFiles/__idf_hal.dir/mmu_hal.c.obj
+[92/129] Building C object esp-idf/soc/CMakeFiles/__idf_soc.dir/esp32s3/gpio_periph.c.obj
+[93/129] Building C object esp-idf/soc/CMakeFiles/__idf_soc.dir/esp32s3/interrupts.c.obj
+[94/129] Building C object esp-idf/soc/CMakeFiles/__idf_soc.dir/esp32s3/dedic_gpio_periph.c.obj
+[95/129] Building C object esp-idf/soc/CMakeFiles/__idf_soc.dir/esp32s3/adc_periph.c.obj
+[96/129] Building C object esp-idf/soc/CMakeFiles/__idf_soc.dir/esp32s3/uart_periph.c.obj
+[97/129] Building C object esp-idf/hal/CMakeFiles/__idf_hal.dir/cache_hal.c.obj
+[98/129] Building C object esp-idf/soc/CMakeFiles/__idf_soc.dir/esp32s3/pcnt_periph.c.obj
+[99/129] Building C object esp-idf/soc/CMakeFiles/__idf_soc.dir/esp32s3/spi_periph.c.obj
+[100/129] Building C object esp-idf/soc/CMakeFiles/__idf_soc.dir/esp32s3/ledc_periph.c.obj
+[101/129] Building C object esp-idf/soc/CMakeFiles/__idf_soc.dir/esp32s3/rmt_periph.c.obj
+[102/129] Building C object esp-idf/soc/CMakeFiles/__idf_soc.dir/esp32s3/i2s_periph.c.obj
+[103/129] Building C object esp-idf/soc/CMakeFiles/__idf_soc.dir/esp32s3/temperature_sensor_periph.c.obj
+[104/129] Building C object esp-idf/soc/CMakeFiles/__idf_soc.dir/esp32s3/sdm_periph.c.obj
+[105/129] Building C object esp-idf/soc/CMakeFiles/__idf_soc.dir/esp32s3/mcpwm_periph.c.obj
+[106/129] Building C object esp-idf/soc/CMakeFiles/__idf_soc.dir/esp32s3/touch_sensor_periph.c.obj
+[107/129] Building C object esp-idf/soc/CMakeFiles/__idf_soc.dir/esp32s3/mpi_periph.c.obj
+[108/129] Building C object esp-idf/soc/CMakeFiles/__idf_soc.dir/esp32s3/sdmmc_periph.c.obj
+[109/129] Building C object esp-idf/soc/CMakeFiles/__idf_soc.dir/esp32s3/twai_periph.c.obj
+[110/129] Building C object esp-idf/soc/CMakeFiles/__idf_soc.dir/esp32s3/usb_dwc_periph.c.obj
+[111/129] Building C object esp-idf/soc/CMakeFiles/__idf_soc.dir/esp32s3/power_supply_periph.c.obj
+[112/129] Preprocessing linker script /home/fra/workspace-idf/esp-idf/components/bootloader/subproject/main/ld/esp32s3/bootloader.ld.in -> /home/fra/workspace-idf/ClaudeESP32s3CamTFMini/build/bootloader/ld/bootloader.ld
+[113/129] Building C object esp-idf/soc/CMakeFiles/__idf_soc.dir/esp32s3/cam_periph.c.obj
+[114/129] Generating project_elf_src_esp32s3.c
+[115/129] Building C object CMakeFiles/bootloader.elf.dir/project_elf_src_esp32s3.c.obj
+[116/129] Building C object esp-idf/xtensa/CMakeFiles/__idf_xtensa.dir/eri.c.obj
+[117/129] Building C object esp-idf/soc/CMakeFiles/__idf_soc.dir/esp32s3/rtc_io_periph.c.obj
+[118/129] Building C object esp-idf/xtensa/CMakeFiles/__idf_xtensa.dir/xt_trax.c.obj
+[119/129] Building C object esp-idf/main/CMakeFiles/__idf_main.dir/bootloader_start.c.obj
+[120/129] Building C object esp-idf/micro-ecc/CMakeFiles/__idf_micro-ecc.dir/uECC_verify_antifault.c.obj
+[121/129] Linking C static library esp-idf/micro-ecc/libmicro-ecc.a
+[122/129] Linking C static library esp-idf/esp_hal_dma/libesp_hal_dma.a
+[123/129] Linking C static library esp-idf/hal/libhal.a
+[124/129] Linking C static library esp-idf/soc/libsoc.a
+[125/129] Linking C static library esp-idf/xtensa/libxtensa.a
+[126/129] Linking C static library esp-idf/main/libmain.a
+[127/129] Linking C executable bootloader.elf
+[128/129] Generating binary image from built executable
+esptool v5.1.0
+Creating ESP32S3 image...
+Merged 2 ELF sections.
+Successfully created ESP32S3 image.
+Generated /home/fra/workspace-idf/ClaudeESP32s3CamTFMini/build/bootloader/bootloader.bin
+[129/129] cd /home/fra/workspace-idf/ClaudeESP32s3CamTFMini/build/bootloader && /home/fra/.espressif/python_env/idf6.0_py3.13_env/bin/python /home/fra/workspace-idf/esp-idf/components/partition_table/check_sizes.py --offset 0x8000 bootloader 0x0 /home/fra/workspace-idf/ClaudeESP32s3CamTFMini/build/bootloader/bootloader.bin
+Bootloader binary size 0x4b40 bytes. 0x34c0 bytes (41%) free.
+[8/10] No install step for 'bootloader'
+[9/10] Completed 'bootloader'
+[9/10] Running utility command for flash
+esptool --chip esp32s3 -p /dev/ttyUSB0 -b 460800 --before=default-reset --after=hard-reset write-flash --flash-mode dio --flash-freq 80m --flash-size 4MB 0x0 bootloader/bootloader.bin 0x8000 partition_table/partition-table.bin 0x10000 optical_flow_lidar.bin
+esptool v5.1.0
+Serial port /dev/ttyUSB0:
+Connecting....
+[1A[2K[1A[2KConnected to ESP32-S3 on /dev/ttyUSB0:
+Chip type:          ESP32-S3 (QFN56) (revision v0.2)
+Features:           Wi-Fi, BT 5 (LE), Dual Core + LP Core, 240MHz, Embedded PSRAM 8MB (AP_3v3)
+Crystal frequency:  40MHz
+MAC:                30:ed:a0:13:f3:2c
+
+Uploading stub flasher...
+Running stub flasher...
+[1A[2K[1A[2KStub flasher running.
+Changing baud rate to 460800...
+Changed.
+
+Configuring flash size...
+Flash will be erased from 0x00000000 to 0x00004fff...
+Flash will be erased from 0x00008000 to 0x00008fff...
+Flash will be erased from 0x00010000 to 0x00059fff...
+SHA digest in image updated.
+Compressed 19264 bytes to 12546...
+[KWriting at 0x00000000 [                              ]   0.0% 0/12546 bytes... [KWriting at 0x00004b40 [==============================] 100.0% 12546/12546 bytes... 
+[1A[2K[1A[2KWrote 19264 bytes (12546 compressed) at 0x00000000 in 0.6 seconds (256.8 kbit/s).
+Hash of data verified.
+Compressed 3072 bytes to 105...
+[KWriting at 0x00008000 [                              ]   0.0% 0/105 bytes... [KWriting at 0x00008c00 [==============================] 100.0% 105/105 bytes... 
+[1A[2K[1A[2KWrote 3072 bytes (105 compressed) at 0x00008000 in 0.1 seconds (434.4 kbit/s).
+Hash of data verified.
+Compressed 301136 bytes to 191752...
+[KWriting at 0x00010000 [                              ]   0.0% 0/191752 bytes... [KWriting at 0x0001a298 [=>                            ]   8.5% 16384/191752 bytes... [KWriting at 0x0002295f [====>                         ]  17.1% 32768/191752 bytes... [KWriting at 0x00027ba8 [======>                       ]  25.6% 49152/191752 bytes... [KWriting at 0x0002cd36 [=========>                    ]  34.2% 65536/191752 bytes... [KWriting at 0x00033116 [===========>                  ]  42.7% 81920/191752 bytes... [KWriting at 0x000393d2 [==============>               ]  51.3% 98304/191752 bytes... [KWriting at 0x0003f8c9 [================>             ]  59.8% 114688/191752 bytes... [KWriting at 0x00044e2c [===================>          ]  68.4% 131072/191752 bytes... [KWriting at 0x0004a87c [======================>       ]  76.9% 147456/191752 bytes... [KWriting at 0x000500b4 [========================>     ]  85.4% 163840/191752 bytes... [KWriting at 0x00055961 [===========================>  ]  94.0% 180224/191752 bytes... [KWriting at 0x00059850 [==============================] 100.0% 191752/191752 bytes... 
+[1A[2K[1A[2KWrote 301136 bytes (191752 compressed) at 0x00010000 in 4.8 seconds (501.6 kbit/s).
+Hash of data verified.
+
+Hard resetting via RTS pin...
