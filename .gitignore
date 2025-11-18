@@ -1,0 +1,38 @@
+# ESP-IDF build output
+build/
+*.bin
+*.elf
+*.map
+
+# SDK configuration
+sdkconfig.old
+sdkconfig.old.*
+
+# Dependencies managed by ESP Component Manager
+managed_components/
+dependencies.lock
+
+# Eclipse project files
+.cproject
+.project
+.settings/
+.classpath
+
+# VSCode
+.vscode/
+
+# Python
+*.pyc
+__pycache__/
+
+# macOS
+.DS_Store
+
+# Editor backup files
+*~
+*.swp
+*.swo
+*.bak
+
+# Clangd cache
+.cache/
