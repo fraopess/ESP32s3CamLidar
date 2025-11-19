@@ -15,32 +15,29 @@
 // ============================================================================
 // SÉLECTION DE LA CAMÉRA (seulement si USE_CAMERA est activé)
 // ============================================================================
-// NOTE: Si vous avez un OV7725 qui retourne PID=0xFE, utilisez OV7725_CLONE
 //#define USE_OV2640        // Décommenter pour OV2640 (caméra commune ESP32-CAM)
 //#define USE_OV5640        // Décommenter pour OV5640
-#define USE_OV7725        // Décommenter pour OV7725 original (PID=0x77)
+//#define USE_OV7725        // Décommenter pour OV7725 original (PID=0x77)
 
 // ============================================================================
 // Vérification configuration mode flux optique
 // ============================================================================
-#if (defined(USE_CAMERA) + defined(USE_PMW3901)) > 1
-    #error "ERREUR: Sélectionnez UN SEUL mode de flux optique (USE_CAMERA ou USE_PMW3901)!"
-#endif
+// Note: Si USE_CAMERA et USE_PMW3901 sont tous les deux définis, USE_PMW3901 sera prioritaire
 
+// Note: Si aucun mode n'est sélectionné, le système fonctionnera uniquement avec le LiDAR
 #if !defined(USE_CAMERA) && !defined(USE_PMW3901)
-    #error "ERREUR: Sélectionnez un mode (USE_CAMERA ou USE_PMW3901)"
+    #define LIDAR_ONLY_MODE
 #endif
 
 // ============================================================================
 // Vérification configuration caméra (seulement si USE_CAMERA est activé)
 // ============================================================================
+// Note: Si USE_CAMERA est défini, sélectionnez UNE SEULE caméra ci-dessous
+// Si plusieurs caméras sont définies, OV2640 sera prioritaire
 #ifdef USE_CAMERA
-    #if (defined(USE_OV2640) + defined(USE_OV5640) + defined(USE_OV7725) ) > 1
-        #error "ERREUR: Sélectionnez UNE SEULE caméra!"
-    #endif
-
     #if !defined(USE_OV2640) && !defined(USE_OV5640) && !defined(USE_OV7725)
-        #error "ERREUR: Sélectionnez une caméra (décommentez une ligne)"
+        // Par défaut, utiliser OV2640 si aucune caméra n'est spécifiée
+        #define USE_OV2640
     #endif
 #endif
 
@@ -79,10 +76,19 @@
 
 #ifdef USE_CAMERA
 #include "esp_camera.h"
+#include "drivers/camera_optical_flow.h"
 #endif
 
 #ifdef USE_PMW3901
 #include "pmw3901.h"
+#endif
+
+#ifdef USE_TFMINI
+#include "drivers/tfmini.h"
+#endif
+
+#ifdef USE_DTS6012M
+#include "drivers/dts6012m.h"
 #endif
 
 static const char *TAG = "OPTICAL_FLOW";
@@ -126,7 +132,7 @@ static const char *TAG = "OPTICAL_FLOW";
 #endif
 
 #ifdef USE_DTS6012M
-    #define LIDAR_BAUDRATE     921600
+    #define LIDAR_BAUDRATE     921600    // DTS6012M factory default
     #define LIDAR_MODEL        "DTS6012M"
 #endif
 
@@ -245,11 +251,13 @@ static volatile float global_flow_y = 0.0f;
 static volatile float filtered_flow_x = 0.0f;
 static volatile float filtered_flow_y = 0.0f;
 
-static volatile struct {
-    uint16_t distance;
-    uint16_t strength;
-    bool valid;
-} lidar_data = {0, 0, false};
+#ifdef USE_TFMINI
+static volatile tfmini_data_t lidar_data = {0, 0, false};
+#endif
+
+#ifdef USE_DTS6012M
+static volatile dts6012m_data_t lidar_data = {0, 0, false};
+#endif
 
 static volatile uint32_t frame_count = 0;
 static volatile int64_t last_stat_time = 0;
@@ -269,6 +277,7 @@ static uint8_t calculate_checksum(const uint8_t* data, size_t len)
     }
     return checksum;
 }
+
 
 // ============================================================================
 // Envoi paquet binaire
@@ -300,122 +309,16 @@ static void send_binary_packet(uint32_t timestamp_ms, float velocity_x, float ve
 // ============================================================================
 static void init_lidar_uart(void)
 {
-    uart_config_t uart_config = {
-        .baud_rate = LIDAR_BAUDRATE,
-        .data_bits = UART_DATA_8_BITS,
-        .parity = UART_PARITY_DISABLE,
-        .stop_bits = UART_STOP_BITS_1,
-        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
-        .source_clk = UART_SCLK_APB,
-    };
-
-    ESP_ERROR_CHECK(uart_driver_install(LIDAR_UART_NUM, LIDAR_BUF_SIZE * 2, 0, 0, NULL, 0));
-    ESP_ERROR_CHECK(uart_param_config(LIDAR_UART_NUM, &uart_config));
-    ESP_ERROR_CHECK(uart_set_pin(LIDAR_UART_NUM, LIDAR_TX_PIN, LIDAR_RX_PIN,
-                                  UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
-
-    ESP_LOGI(TAG, "%s UART initialized at %d baud", LIDAR_MODEL, LIDAR_BAUDRATE);
-}
-
-// ============================================================================
-// Lecture TFMini
-// ============================================================================
 #ifdef USE_TFMINI
-static void read_tfmini(void)
-{
-    static uint8_t rx_buffer[9];
-    static int rx_index = 0;
-    uint8_t data;
-
-    int count = 0;
-    while (uart_read_bytes(LIDAR_UART_NUM, &data, 1, 0) > 0 && count++ < 20) {
-        rx_buffer[rx_index] = data;
-
-        if (rx_index == 0 && rx_buffer[0] != 0x59) continue;
-        if (rx_index == 1 && rx_buffer[1] != 0x59) {
-            rx_index = 0;
-            continue;
-        }
-
-        rx_index++;
-
-        if (rx_index == 9) {
-            uint8_t checksum = 0;
-            for (int i = 0; i < 8; i++) {
-                checksum += rx_buffer[i];
-            }
-
-            if (rx_buffer[8] == (checksum & 0xFF)) {
-                uint16_t dist = rx_buffer[2] | (rx_buffer[3] << 8);
-                uint16_t strength = rx_buffer[4] | (rx_buffer[5] << 8);
-
-                if (dist > 0 && dist <= MAX_VALID_DISTANCE_CM) {
-                    lidar_data.distance = dist;
-                    lidar_data.strength = strength;
-                    lidar_data.valid = true;
-                } else {
-                    lidar_data.valid = false;
-                }
-            }
-
-            rx_index = 0;
-            break;
-        }
-    }
-}
+    ESP_ERROR_CHECK(tfmini_init(LIDAR_UART_NUM, LIDAR_TX_PIN, LIDAR_RX_PIN, LIDAR_BUF_SIZE));
 #endif
 
-// ============================================================================
-// Lecture DTS6012M
-// ============================================================================
 #ifdef USE_DTS6012M
-static void read_dts6012m(void)
-{
-    static uint8_t rx_buffer[15];
-    static int rx_index = 0;
-    uint8_t data;
-
-    int count = 0;
-    while (uart_read_bytes(LIDAR_UART_NUM, &data, 1, 0) > 0 && count++ < 50) {
-        rx_buffer[rx_index] = data;
-
-        // Recherche header 0xAA 0x55
-        if (rx_index == 0 && rx_buffer[0] != 0xAA) continue;
-        if (rx_index == 1 && rx_buffer[1] != 0x55) {
-            rx_index = 0;
-            continue;
-        }
-
-        rx_index++;
-
-        // Paquet complet: 15 octets
-        // [0xAA 0x55][dist_L dist_H][int_L int_H][dist2_L dist2_H][int2_L int2_H][temp_L temp_H][status][crc_L crc_H]
-        if (rx_index == 15) {
-            // CRC-16 CCITT validation (optionnel pour performance)
-            // Pour vitesse maximale, on peut sauter la vérification CRC
-
-            uint16_t dist_primary = rx_buffer[2] | (rx_buffer[3] << 8);
-            uint16_t intensity_primary = rx_buffer[4] | (rx_buffer[5] << 8);
-            uint8_t status = rx_buffer[12];
-
-            // Le DTS6012M retourne la distance en millimètres, convertir en cm
-            dist_primary /= 10;
-
-            // Status byte: bit 0 = valid measurement
-            if ((status & 0x01) && dist_primary > 0 && dist_primary <= MAX_VALID_DISTANCE_CM) {
-                lidar_data.distance = dist_primary;
-                lidar_data.strength = intensity_primary;
-                lidar_data.valid = true;
-            } else {
-                lidar_data.valid = false;
-            }
-
-            rx_index = 0;
-            break;
-        }
-    }
-}
+    ESP_ERROR_CHECK(dts6012m_init(LIDAR_UART_NUM, LIDAR_TX_PIN, LIDAR_RX_PIN, LIDAR_BUF_SIZE));
 #endif
+}
+
+
 
 // ============================================================================
 // Lecture LiDAR (appelle la fonction appropriée)
@@ -423,96 +326,12 @@ static void read_dts6012m(void)
 static inline void read_lidar(void)
 {
 #ifdef USE_TFMINI
-    read_tfmini();
+    tfmini_read(LIDAR_UART_NUM, &lidar_data, MAX_VALID_DISTANCE_CM);
 #endif
 #ifdef USE_DTS6012M
-    read_dts6012m();
+    dts6012m_read(LIDAR_UART_NUM, &lidar_data, MAX_VALID_DISTANCE_CM);
 #endif
 }
-
-// ============================================================================
-// Flux optique Lucas-Kanade optimisé (seulement si USE_CAMERA est activé)
-// ============================================================================
-#ifdef USE_CAMERA
-static void compute_optical_flow_optimized(uint8_t* prev, uint8_t* cur)
-{
-    float sum_Ix2 = 0.0f;
-    float sum_Iy2 = 0.0f;
-    float sum_IxIy = 0.0f;
-    float sum_IxIt = 0.0f;
-    float sum_IyIt = 0.0f;
-    int valid_pixels = 0;
-    
-    const int width = IMG_WIDTH;
-    const int height = IMG_HEIGHT;
-    const int step = OPTICAL_FLOW_STEP;
-    
-    const int margin = 5;
-    const int start_y = margin;
-    const int end_y = height - margin;
-    const int start_x = margin;
-    const int end_x = width - margin;
-    
-    for (int y = start_y; y < end_y; y += step) {
-        const int row_offset = y * width;
-        const int row_offset_prev = (y - 1) * width;
-        const int row_offset_next = (y + 1) * width;
-        
-        for (int x = start_x; x < end_x; x += step) {
-            const int idx = row_offset + x;
-            
-            const int Ix_int = 
-                -cur[idx - 1 - width] + cur[idx + 1 - width] +
-                -(cur[idx - 1] << 1) + (cur[idx + 1] << 1) +
-                -cur[idx - 1 + width] + cur[idx + 1 + width];
-            const float Ix = (float)Ix_int * 0.125f;
-            
-            const int Iy_int =
-                -cur[row_offset_prev + x - 1] - (cur[row_offset_prev + x] << 1) - cur[row_offset_prev + x + 1] +
-                 cur[row_offset_next + x - 1] + (cur[row_offset_next + x] << 1) + cur[row_offset_next + x + 1];
-            const float Iy = (float)Iy_int * 0.125f;
-            
-            const float It = (float)cur[idx] - (float)prev[idx];
-            
-            const float grad_mag_sq = Ix * Ix + Iy * Iy;
-            if (grad_mag_sq > MIN_GRADIENT_THRESHOLD * MIN_GRADIENT_THRESHOLD) {
-                sum_Ix2 += Ix * Ix;
-                sum_Iy2 += Iy * Iy;
-                sum_IxIy += Ix * Iy;
-                sum_IxIt += Ix * It;
-                sum_IyIt += Iy * It;
-                valid_pixels++;
-            }
-        }
-    }
-    
-    if (valid_pixels > MIN_VALID_PIXELS) {
-        const float det = sum_Ix2 * sum_Iy2 - sum_IxIy * sum_IxIy;
-        
-        if (fabsf(det) > 1e-5f) {
-            const float inv_det = 1.0f / det;
-            
-            float flow_x = -(sum_Iy2 * sum_IxIt - sum_IxIy * sum_IyIt) * inv_det;
-            float flow_y = -(sum_Ix2 * sum_IyIt - sum_IxIy * sum_IxIt) * inv_det;
-            
-            flow_x = (flow_x > 50.0f) ? 50.0f : ((flow_x < -50.0f) ? -50.0f : flow_x);
-            flow_y = (flow_y > 50.0f) ? 50.0f : ((flow_y < -50.0f) ? -50.0f : flow_y);
-            
-            filtered_flow_x = filtered_flow_x * (1.0f - FLOW_SMOOTHING_ALPHA) + flow_x * FLOW_SMOOTHING_ALPHA;
-            filtered_flow_y = filtered_flow_y * (1.0f - FLOW_SMOOTHING_ALPHA) + flow_y * FLOW_SMOOTHING_ALPHA;
-            
-            global_flow_x = filtered_flow_x;
-            global_flow_y = filtered_flow_y;
-        } else {
-            global_flow_x = 0.0f;
-            global_flow_y = 0.0f;
-        }
-    } else {
-        global_flow_x = 0.0f;
-        global_flow_y = 0.0f;
-    }
-}
-#endif  // USE_CAMERA
 
 // ============================================================================
 // Initialisation caméra (OV2640 ou OV5640)
@@ -520,12 +339,12 @@ static void compute_optical_flow_optimized(uint8_t* prev, uint8_t* cur)
 #ifdef USE_CAMERA
 static esp_err_t init_camera(void)
 {
-    camera_config_t config = {
+    camera_config_optical_flow_t config = {
         .pin_pwdn = CAM_PIN_PWDN,
         .pin_reset = CAM_PIN_RESET,
         .pin_xclk = CAM_PIN_XCLK,
-        .pin_sccb_sda = CAM_PIN_SIOD,
-        .pin_sccb_scl = CAM_PIN_SIOC,
+        .pin_siod = CAM_PIN_SIOD,
+        .pin_sioc = CAM_PIN_SIOC,
         .pin_d7 = CAM_PIN_D7,
         .pin_d6 = CAM_PIN_D6,
         .pin_d5 = CAM_PIN_D5,
@@ -537,106 +356,18 @@ static esp_err_t init_camera(void)
         .pin_vsync = CAM_PIN_VSYNC,
         .pin_href = CAM_PIN_HREF,
         .pin_pclk = CAM_PIN_PCLK,
-        
-        .xclk_freq_hz = XCLK_FREQ,
-        .ledc_timer = LEDC_TIMER_0,
-        .ledc_channel = LEDC_CHANNEL_0,
-        
-        .pixel_format = PIXFORMAT_GRAYSCALE,
+        .xclk_freq = XCLK_FREQ,
         .frame_size = CAMERA_FRAME_SIZE,
-        
-        .jpeg_quality = 12,
-        .fb_count = 2,
-        .fb_location = CAMERA_FB_IN_PSRAM,
-        .grab_mode = CAMERA_GRAB_LATEST,
+        .img_width = IMG_WIDTH,
+        .img_height = IMG_HEIGHT,
+        .focal_length_px = FOCAL_LENGTH_PX,
+        .pixel_size_mm = PIXEL_SIZE_MM,
+        .flow_smoothing_alpha = FLOW_SMOOTHING_ALPHA,
+        .min_gradient_threshold = MIN_GRADIENT_THRESHOLD,
+        .min_valid_pixels = MIN_VALID_PIXELS,
     };
-    
-    ESP_LOGI(TAG, "Initializing camera...");
-    ESP_LOGI(TAG, "Expected camera: %s (PID=0x%x)", CAMERA_MODEL, CAMERA_PID);
-    ESP_LOGI(TAG, "XCLK frequency: %d MHz", XCLK_FREQ / 1000000);
-    ESP_LOGI(TAG, "I2C pins: SDA=%d, SCL=%d", CAM_PIN_SIOD, CAM_PIN_SIOC);
 
-    esp_err_t err = esp_camera_init(&config);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Camera init failed: 0x%x", err);
-        ESP_LOGE(TAG, "Possible causes:");
-        ESP_LOGE(TAG, "  1. Camera not connected properly");
-        ESP_LOGE(TAG, "  2. Wrong camera model (try USE_OV2640 or USE_OV5640)");
-        ESP_LOGE(TAG, "  3. Power supply issue");
-        ESP_LOGE(TAG, "  4. I2C/SCCB communication problem");
-        return err;
-    }
-
-    sensor_t *s = esp_camera_sensor_get();
-
-    // Afficher les informations du capteur détecté
-    ESP_LOGI(TAG, "Camera detected - PID: 0x%x, VER: 0x%x, MIDL: 0x%x, MIDH: 0x%x",
-             s->id.PID, s->id.VER, s->id.MIDL, s->id.MIDH);
-
-    // Vérifier que le bon capteur est détecté
-    if (s->id.PID != CAMERA_PID) {
-        ESP_LOGW(TAG, "Camera PID mismatch! Expected 0x%x, got 0x%x", CAMERA_PID, s->id.PID);
-        ESP_LOGW(TAG, "La caméra détectée ne correspond pas à %s", CAMERA_MODEL);
-        ESP_LOGW(TAG, "Identifiez votre caméra:");
-        ESP_LOGW(TAG, "  PID 0x26 = OV2640");
-        ESP_LOGW(TAG, "  PID 0x5640 = OV5640");
-        ESP_LOGW(TAG, "  PID 0x77 = OV7725 (original)");
-        ESP_LOGW(TAG, "  PID 0x76 = OV7670");
-        ESP_LOGW(TAG, "Changez le #define dans main.c pour correspondre à votre caméra");
-    } else {
-        ESP_LOGI(TAG, "%s confirmed!", CAMERA_MODEL);
-    }
-
-    // Configuration commune
-    s->set_vflip(s, 0);
-    s->set_hmirror(s, 0);
-    s->set_whitebal(s, 0);
-    s->set_awb_gain(s, 0);
-    s->set_exposure_ctrl(s, 0);
-    s->set_aec2(s, 0);
-    s->set_ae_level(s, 0);
-    s->set_aec_value(s, 300);
-    s->set_gain_ctrl(s, 0);
-    s->set_agc_gain(s, 5);
-    s->set_bpc(s, 0);
-    s->set_wpc(s, 0);
-    s->set_lenc(s, 0);
-
-    // Configuration spécifique OV2640
-    #ifdef USE_OV2640
-    if (s->id.PID == OV2640_PID) {
-        s->set_raw_gma(s, 0);
-        s->set_dcw(s, 0);
-        ESP_LOGI(TAG, "OV2640 configured");
-    }
-    #endif
-
-    // Configuration spécifique OV5640
-    #ifdef USE_OV5640
-    if (s->id.PID == OV5640_PID) {
-        ESP_LOGI(TAG, "OV5640 configured");
-    }
-    #endif
-
-    // Configuration spécifique OV7725 (optimisée pour vitesse)
-    #if defined(USE_OV7725) 
-    if (s->id.PID == OV7725_PID ) {
-        // OV7725 optimisations pour framerate maximal
-        s->set_brightness(s, 0);      // Brightness neutre
-        s->set_contrast(s, 0);        // Contrast neutre
-        s->set_saturation(s, 0);      // Saturation neutre (N&B)
-        s->set_special_effect(s, 0);  // Pas d'effets spéciaux
-        s->set_colorbar(s, 0);        // Pas de colorbar
-
-        // Désactiver tous les traitements pour vitesse maximale
-        s->set_raw_gma(s, 0);         // Pas de gamma correction
-        s->set_dcw(s, 0);             // Pas de downsize
-
-        ESP_LOGI(TAG, "%s configured for maximum speed", CAMERA_MODEL);
-    }
-    #endif
-    
-    return ESP_OK;
+    return camera_optical_flow_init(&config);
 }
 #endif  // USE_CAMERA
 
@@ -700,7 +431,9 @@ static void camera_task(void *pvParameters)
                 first_frame = false;
             } else {
                 memcpy(img_cur, fb->buf, fb->len);
-                compute_optical_flow_optimized(img_prev, img_cur);
+                camera_optical_flow_compute(img_prev, img_cur, IMG_WIDTH, IMG_HEIGHT, OPTICAL_FLOW_STEP,
+                                           MIN_GRADIENT_THRESHOLD, MIN_VALID_PIXELS, FLOW_SMOOTHING_ALPHA,
+                                           &global_flow_x, &global_flow_y);
                 memcpy(img_prev, img_cur, fb->len);
                 
                 frame_count++;
@@ -816,39 +549,53 @@ static void pmw3901_task(void *pvParameters)
 // ============================================================================
 static void lidar_serial_task(void *pvParameters)
 {
-    ESP_LOGI(TAG, "LiDAR/Serial task started on core %d", xPortGetCoreID());
+    // ESP_LOGI(TAG, "LiDAR/Serial task started on core %d", xPortGetCoreID());
 
     sensor_data_t data;
 
-    printf("\n=================================\n");
-    printf("ESP32-S3 Optical Flow System\n");
-#ifdef USE_CAMERA
-    printf("Mode: Camera-based optical flow\n");
-    printf("Camera: %s\n", CAMERA_MODEL);
-    printf("Resolution: %dx%d\n", IMG_WIDTH, IMG_HEIGHT);
-    printf("XCLK: %d MHz\n", XCLK_FREQ / 1000000);
-    printf("Pixel size: %.4f mm\n", PIXEL_SIZE_MM);
-    printf("Focal length: %.2f px\n", FOCAL_LENGTH_PX);
-#endif
-#ifdef USE_PMW3901
-    printf("Mode: PMW3901 optical flow sensor\n");
-    printf("Sensor: PMW3901\n");
-    printf("FOV: 42 degrees\n");
-    printf("Max rate: 121 FPS\n");
-    printf("Pixel size: %.4f mm\n", PMW3901_PIXEL_SIZE_MM);
-    printf("Focal length: %.2f px\n", PMW3901_FOCAL_LENGTH_PX);
-#endif
-    printf("LiDAR: %s\n", LIDAR_MODEL);
-    printf("=================================\n");
-    printf("Binary Protocol Mode\n");
-    printf("Packet: [0xAA 0x55][ts(4)][vx(2)][vy(2)][dist(2)][chk(1)]\n");
-    printf("Starting transmission...\n\n");
+    // printf("\n=================================\n");
+    // printf("ESP32-S3 Optical Flow System\n");
+// #ifdef LIDAR_ONLY_MODE
+    // printf("Mode: LiDAR only\n");
+// #endif
+// #ifdef USE_CAMERA
+    // printf("Mode: Camera-based optical flow\n");
+    // printf("Camera: %s\n", CAMERA_MODEL);
+    // printf("Resolution: %dx%d\n", IMG_WIDTH, IMG_HEIGHT);
+    // printf("XCLK: %d MHz\n", XCLK_FREQ / 1000000);
+    // printf("Pixel size: %.4f mm\n", PIXEL_SIZE_MM);
+    // printf("Focal length: %.2f px\n", FOCAL_LENGTH_PX);
+// #endif
+// #ifdef USE_PMW3901
+    // printf("Mode: PMW3901 optical flow sensor\n");
+    // printf("Sensor: PMW3901\n");
+    // printf("FOV: 42 degrees\n");
+    // printf("Max rate: 121 FPS\n");
+    // printf("Pixel size: %.4f mm\n", PMW3901_PIXEL_SIZE_MM);
+    // printf("Focal length: %.2f px\n", PMW3901_FOCAL_LENGTH_PX);
+// #endif
+    // printf("LiDAR: %s\n", LIDAR_MODEL);
+    // printf("=================================\n");
+    // printf("Binary Protocol Mode\n");
+    // printf("Packet: [0xAA 0x55][ts(4)][vx(2)][vy(2)][dist(2)][chk(1)]\n");
+    // printf("Starting transmission...\n\n");
 
     vTaskDelay(pdMS_TO_TICKS(500));
 
     while (1) {
         read_lidar();
 
+#ifdef LIDAR_ONLY_MODE
+        // Mode LiDAR uniquement - pas de flux optique
+        if (lidar_data.valid) {
+            int64_t timestamp = esp_timer_get_time();
+            uint32_t timestamp_ms = (uint32_t)(timestamp / 1000);
+            // Envoyer uniquement les données LiDAR, vitesse = 0
+            send_binary_packet(timestamp_ms, 0.0f, 0.0f, lidar_data.distance);
+        }
+        vTaskDelay(pdMS_TO_TICKS(10));  // ~100 Hz pour LiDAR seul
+#else
+        // Mode avec flux optique
         if (xQueueReceive(dataQueue, &data, pdMS_TO_TICKS(10)) == pdTRUE) {
             uint32_t timestamp_ms = (uint32_t)(data.timestamp / 1000);
             send_binary_packet(timestamp_ms, data.velocity_x, data.velocity_y,
@@ -856,6 +603,7 @@ static void lidar_serial_task(void *pvParameters)
         }
 
         vTaskDelay(pdMS_TO_TICKS(1));
+#endif
     }
 }
 
@@ -864,62 +612,98 @@ static void lidar_serial_task(void *pvParameters)
 // ============================================================================
 void app_main(void)
 {
-    ESP_LOGI(TAG, "=== ESP32-S3 Optical Flow + LiDAR ===");
+    // Very first output - should appear immediately
+    // printf("\n\n\n*** APP_MAIN STARTED ***\n");
+    // printf("*** UART OUTPUT TEST ***\n");
+    // printf("*** If you see this, UART is working! ***\n\n");
+
+    // ESP_LOGI(TAG, "=== ESP32-S3 Optical Flow + LiDAR ===");
+
+// #ifdef LIDAR_ONLY_MODE
+    // ESP_LOGI(TAG, "Mode: LiDAR only (no optical flow sensor)");
+// #endif
 
 #ifdef USE_CAMERA
-    ESP_LOGI(TAG, "Mode: Camera-based optical flow");
-    ESP_LOGI(TAG, "Camera selected: %s", CAMERA_MODEL);
+    // ESP_LOGI(TAG, "Mode: Camera-based optical flow");
+    // ESP_LOGI(TAG, "Camera selected: %s", CAMERA_MODEL);
 
     ESP_ERROR_CHECK(init_camera());
-    ESP_LOGI(TAG, "Camera initialized");
+    // ESP_LOGI(TAG, "Camera initialized");
 
-    img_prev = (uint8_t *)heap_caps_malloc(IMG_WIDTH * IMG_HEIGHT, MALLOC_CAP_SPIRAM);
-    img_cur = (uint8_t *)heap_caps_malloc(IMG_WIDTH * IMG_HEIGHT, MALLOC_CAP_SPIRAM);
-
-    if (!img_prev || !img_cur) {
-        ESP_LOGE(TAG, "Failed to allocate memory");
-        while(1) vTaskDelay(pdMS_TO_TICKS(1000));
-    }
-
-    ESP_LOGI(TAG, "Memory allocated");
+    ESP_ERROR_CHECK(camera_optical_flow_alloc_buffers(IMG_WIDTH, IMG_HEIGHT, &img_prev, &img_cur));
+    // ESP_LOGI(TAG, "Memory allocated");
 #endif
 
 #ifdef USE_PMW3901
-    ESP_LOGI(TAG, "Mode: PMW3901 optical flow sensor");
+    // ESP_LOGI(TAG, "Mode: PMW3901 optical flow sensor");
 
-    ESP_ERROR_CHECK(init_pmw3901());
-    ESP_LOGI(TAG, "PMW3901 initialized");
+    esp_err_t ret = init_pmw3901();
+    if (ret != ESP_OK) {
+        // ESP_LOGE(TAG, "PMW3901 initialization failed. Continuing in LiDAR-only mode.");
+        // Don't halt - continue with LiDAR only
+    } else {
+        // ESP_LOGI(TAG, "PMW3901 initialized");
+    }
 #endif
 
     init_lidar_uart();
 
+#ifdef USE_DTS6012M
+    // Send start measurement command to DTS6012M
+    vTaskDelay(pdMS_TO_TICKS(200));  // Wait for sensor to be ready
+    dts6012m_start_measurement(LIDAR_UART_NUM);
+#endif
+
+#ifndef LIDAR_ONLY_MODE
     frameMutex = xSemaphoreCreateMutex();
     dataQueue = xQueueCreate(20, sizeof(sensor_data_t));
 
     if (!frameMutex || !dataQueue) {
-        ESP_LOGE(TAG, "Failed to create mutex/queue");
+        // ESP_LOGE(TAG, "Failed to create mutex/queue");
         return;
     }
+#else
+    dataQueue = xQueueCreate(20, sizeof(sensor_data_t));
+    if (!dataQueue) {
+        // ESP_LOGE(TAG, "Failed to create queue");
+        return;
+    }
+#endif
 
     last_stat_time = esp_timer_get_time();
 
 #ifdef USE_CAMERA
     xTaskCreatePinnedToCore(camera_task, "CameraTask", 8192, NULL, 5, NULL, 0);
-    ESP_LOGI(TAG, "Camera task created on core 0");
+    // ESP_LOGI(TAG, "Camera task created on core 0");
 #endif
 
 #ifdef USE_PMW3901
-    xTaskCreatePinnedToCore(pmw3901_task, "PMW3901Task", 4096, NULL, 5, NULL, 0);
-    ESP_LOGI(TAG, "PMW3901 task created on core 0");
+    if (pmw3901_handle != NULL) {
+        xTaskCreatePinnedToCore(pmw3901_task, "PMW3901Task", 4096, NULL, 5, NULL, 0);
+        // ESP_LOGI(TAG, "PMW3901 task created on core 0");
+    }
 #endif
 
     xTaskCreatePinnedToCore(lidar_serial_task, "LidarTask", 4096, NULL, 3, NULL, 1);
-    ESP_LOGI(TAG, "LiDAR task created on core 1");
+    // ESP_LOGI(TAG, "LiDAR task created on core 1");
 
-#ifdef USE_CAMERA
-    ESP_LOGI(TAG, "System running with %s", CAMERA_MODEL);
-#endif
-#ifdef USE_PMW3901
-    ESP_LOGI(TAG, "System running with PMW3901");
-#endif
+// #ifdef USE_CAMERA
+    // ESP_LOGI(TAG, "System running with %s", CAMERA_MODEL);
+// #endif
+// #ifdef USE_PMW3901
+    // if (pmw3901_handle != NULL) {
+        // ESP_LOGI(TAG, "System running with PMW3901");
+    // }
+// #endif
+// #ifdef LIDAR_ONLY_MODE
+    // ESP_LOGI(TAG, "System running with LiDAR only");
+// #endif
+
+    // ESP_LOGI(TAG, "*** Initialization complete ***");
+    // ESP_LOGI(TAG, "System running - binary data streaming...");
+
+    // Keep app_main alive
+    while (1) {
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
 }
