@@ -62,7 +62,7 @@ static const uint8_t default_regs[][2] = {
     {COM10,         COM10_VSYNC_NEG | COM10_PCLK_FREE}, //Invert VSYNC and MASK PCLK
     {BDBASE,        0x7F},
     {DBSTEP,        0x03},
-    {AEW,           0x75},
+    {AEW,           0x60},
     {AEB,           0x64},
     {VPT,           0xA1},
     {EXHCL,         0x00},

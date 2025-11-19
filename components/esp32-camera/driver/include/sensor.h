@@ -31,13 +31,14 @@ typedef enum {
     SC101IOT_PID = 0xda4a,
     SC030IOT_PID = 0x9a46,
     SC031GS_PID = 0x0031,
-    MEGA_CCM_PID =0x039E, 
+    MEGA_CCM_PID =0x039E,
     HM1055_PID = 0x0955,
     HM0360_PID = 0x0360
 } camera_pid_t;
 
 typedef enum {
     CAMERA_OV7725,
+    CAMERA_OV7725_CLONE,  // OV7725 clone with PID=0xFE
     CAMERA_OV2640,
     CAMERA_OV3660,
     CAMERA_OV5640,

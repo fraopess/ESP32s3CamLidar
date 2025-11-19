@@ -7,21 +7,41 @@
  */
 
 // ============================================================================
-// SÉLECTION DE LA CAMÉRA (décommenter UNE SEULE ligne)
+// SÉLECTION DU MODE DE FLUX OPTIQUE (décommenter UNE SEULE ligne)
 // ============================================================================
-//#define USE_OV2640  // Décommenter pour OV2640
-//#define USE_OV5640  // Décommenter pour OV5640
-#define USE_OV7725  // Décommenter pour OV7725 (optimisé vitesse)
+//#define USE_CAMERA        // Utiliser la caméra pour le flux optique
+//#define USE_PMW3901       // Utiliser le capteur PMW3901 pour le flux optique
 
 // ============================================================================
-// Vérification configuration caméra
+// SÉLECTION DE LA CAMÉRA (seulement si USE_CAMERA est activé)
 // ============================================================================
-#if (defined(USE_OV2640) + defined(USE_OV5640) + defined(USE_OV7725)) > 1
-    #error "ERREUR: Sélectionnez UNE SEULE caméra!"
+// NOTE: Si vous avez un OV7725 qui retourne PID=0xFE, utilisez OV7725_CLONE
+//#define USE_OV2640        // Décommenter pour OV2640 (caméra commune ESP32-CAM)
+//#define USE_OV5640        // Décommenter pour OV5640
+#define USE_OV7725        // Décommenter pour OV7725 original (PID=0x77)
+
+// ============================================================================
+// Vérification configuration mode flux optique
+// ============================================================================
+#if (defined(USE_CAMERA) + defined(USE_PMW3901)) > 1
+    #error "ERREUR: Sélectionnez UN SEUL mode de flux optique (USE_CAMERA ou USE_PMW3901)!"
 #endif
 
-#if !defined(USE_OV2640) && !defined(USE_OV5640) && !defined(USE_OV7725)
-    #error "ERREUR: Sélectionnez une caméra (décommentez une ligne)"
+#if !defined(USE_CAMERA) && !defined(USE_PMW3901)
+    #error "ERREUR: Sélectionnez un mode (USE_CAMERA ou USE_PMW3901)"
+#endif
+
+// ============================================================================
+// Vérification configuration caméra (seulement si USE_CAMERA est activé)
+// ============================================================================
+#ifdef USE_CAMERA
+    #if (defined(USE_OV2640) + defined(USE_OV5640) + defined(USE_OV7725) ) > 1
+        #error "ERREUR: Sélectionnez UNE SEULE caméra!"
+    #endif
+
+    #if !defined(USE_OV2640) && !defined(USE_OV5640) && !defined(USE_OV7725)
+        #error "ERREUR: Sélectionnez une caméra (décommentez une ligne)"
+    #endif
 #endif
 
 // ============================================================================
@@ -55,8 +75,15 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "driver/uart.h"
-#include "esp_camera.h"
 #include "esp_heap_caps.h"
+
+#ifdef USE_CAMERA
+#include "esp_camera.h"
+#endif
+
+#ifdef USE_PMW3901
+#include "pmw3901.h"
+#endif
 
 static const char *TAG = "OPTICAL_FLOW";
 
@@ -64,24 +91,26 @@ static const char *TAG = "OPTICAL_FLOW";
 #pragma GCC optimize ("unroll-loops")
 
 // ============================================================================
-// Configuration pins (identique pour OV2640 et OV5640 sur ESP32-S3)
+// Configuration pins ESP32-S3-CAM (seulement si USE_CAMERA)
 // ============================================================================
-#define CAM_PIN_PWDN    -1
-#define CAM_PIN_RESET   -1
-#define CAM_PIN_XCLK    15
-#define CAM_PIN_SIOD    4
-#define CAM_PIN_SIOC    5
-#define CAM_PIN_D7      16
-#define CAM_PIN_D6      17
-#define CAM_PIN_D5      18
-#define CAM_PIN_D4      12
-#define CAM_PIN_D3      10
-#define CAM_PIN_D2      8
-#define CAM_PIN_D1      9
-#define CAM_PIN_D0      11
-#define CAM_PIN_VSYNC   6
-#define CAM_PIN_HREF    7
-#define CAM_PIN_PCLK    13
+#ifdef USE_CAMERA
+    #define CAM_PIN_PWDN    -1
+    #define CAM_PIN_RESET   -1
+    #define CAM_PIN_XCLK    15
+    #define CAM_PIN_SIOD    4
+    #define CAM_PIN_SIOC    5
+    #define CAM_PIN_D7      16
+    #define CAM_PIN_D6      17
+    #define CAM_PIN_D5      18
+    #define CAM_PIN_D4      12
+    #define CAM_PIN_D3      10
+    #define CAM_PIN_D2      8
+    #define CAM_PIN_D1      9
+    #define CAM_PIN_D0      11
+    #define CAM_PIN_VSYNC   6
+    #define CAM_PIN_HREF    7
+    #define CAM_PIN_PCLK    13
+#endif
 
 // ============================================================================
 // Configuration UART LiDAR
@@ -102,52 +131,73 @@ static const char *TAG = "OPTICAL_FLOW";
 #endif
 
 // ============================================================================
-// Configuration spécifique selon la caméra
+// Configuration SPI PMW3901 (Optical Flow Sensor)
 // ============================================================================
-#ifdef USE_OV2640
-    // Configuration OV2640
-    #define CAMERA_MODEL        "OV2640"
-    #define CAMERA_PID          OV2640_PID
-    #define IMG_WIDTH           160
-    #define IMG_HEIGHT          120
-    #define CAMERA_FRAME_SIZE   FRAMESIZE_QQVGA
-    #define XCLK_FREQ           20000000    // 20MHz
-    #define FOCAL_LENGTH_PX     50.0f       // À calibrer
-    #define PIXEL_SIZE_MM       0.0028f     // 2.8µm
-    #define FLOW_SMOOTHING_ALPHA      1.00f  // Filtre moyen (OV2640 plus bruité)
-    #define MIN_GRADIENT_THRESHOLD    8.0f  // Seuil plus élevé
-    #define MIN_VALID_PIXELS          150   // Pixels minimum
+#ifdef USE_PMW3901
+    #define PMW3901_SPI_HOST   SPI2_HOST
+    #define PMW3901_PIN_CS     1    // À adapter selon votre câblage
+    #define PMW3901_PIN_SCK    2    // À adapter selon votre câblage
+    #define PMW3901_PIN_MOSI   3    // À adapter selon votre câblage
+    #define PMW3901_PIN_MISO   21   // À adapter selon votre câblage
+
+    // Paramètres du capteur PMW3901
+    #define PMW3901_FOCAL_LENGTH_PX    42.0f     // FOV de 42°, ~35x35 pixels effectifs
+    #define PMW3901_PIXEL_SIZE_MM      0.030f    // Estimation basée sur FOV
+    #define PMW3901_MAX_DELTA          127       // Valeur maximale de delta (8-bit signé)
+    #define PMW3901_FLOW_SCALE         1.0f      // Facteur d'échelle pour le flux
 #endif
 
-#ifdef USE_OV5640
-    // Configuration OV5640
-    #define CAMERA_MODEL        "OV5640"
-    #define CAMERA_PID          OV5640_PID
-    #define IMG_WIDTH           160
-    #define IMG_HEIGHT          120
-    #define CAMERA_FRAME_SIZE   FRAMESIZE_QQVGA
-    #define XCLK_FREQ           40000000    // 40MHz
-    #define FOCAL_LENGTH_PX     40.27f      // À calibrer
-    #define PIXEL_SIZE_MM       0.0014f     // 1.4µm
-    #define FLOW_SMOOTHING_ALPHA      1.00f // Filtre léger (OV5640 moins bruité)
-    #define MIN_GRADIENT_THRESHOLD    5.0f  // Seuil plus bas (meilleur SNR)
-    #define MIN_VALID_PIXELS          120   // Moins de pixels requis
-#endif
+// ============================================================================
+// Configuration spécifique selon la caméra (seulement si USE_CAMERA est activé)
+// ============================================================================
+#ifdef USE_CAMERA
 
-#ifdef USE_OV7725
-    // Configuration OV7725 (optimisée pour vitesse maximale)
-    #define CAMERA_MODEL        "OV7725"
-    #define CAMERA_PID          OV7725_PID
-    #define IMG_WIDTH           160
-    #define IMG_HEIGHT          120
-    #define CAMERA_FRAME_SIZE   FRAMESIZE_QQVGA
-    #define XCLK_FREQ           24000000    // 24MHz (optimal pour OV7725)
-    #define FOCAL_LENGTH_PX     45.0f       // À calibrer
-    #define PIXEL_SIZE_MM       0.006f      // 6µm (pixels plus grands = moins de bruit)
-    #define FLOW_SMOOTHING_ALPHA      1.00f // Pas de filtrage pour réactivité maximale
-    #define MIN_GRADIENT_THRESHOLD    6.0f  // Seuil modéré
-    #define MIN_VALID_PIXELS          100   // Moins de pixels pour vitesse
-#endif
+    #ifdef USE_OV2640
+        // Configuration OV2640
+        #define CAMERA_MODEL        "OV2640"
+        #define CAMERA_PID          OV2640_PID
+        #define IMG_WIDTH           160
+        #define IMG_HEIGHT          120
+        #define CAMERA_FRAME_SIZE   FRAMESIZE_QQVGA
+        #define XCLK_FREQ           10000000    // 10MHz (réduit pour meilleure stabilité I2C)
+        #define FOCAL_LENGTH_PX     50.0f       // À calibrer
+        #define PIXEL_SIZE_MM       0.0028f     // 2.8µm
+        #define FLOW_SMOOTHING_ALPHA      1.00f  // Filtre moyen (OV2640 plus bruité)
+        #define MIN_GRADIENT_THRESHOLD    8.0f  // Seuil plus élevé
+        #define MIN_VALID_PIXELS          150   // Pixels minimum
+    #endif
+
+    #ifdef USE_OV5640
+        // Configuration OV5640
+        #define CAMERA_MODEL        "OV5640"
+        #define CAMERA_PID          OV5640_PID
+        #define IMG_WIDTH           160
+        #define IMG_HEIGHT          120
+        #define CAMERA_FRAME_SIZE   FRAMESIZE_QQVGA
+        #define XCLK_FREQ           20000000    // 20MHz (réduit pour meilleure stabilité I2C)
+        #define FOCAL_LENGTH_PX     40.27f      // À calibrer
+        #define PIXEL_SIZE_MM       0.0014f     // 1.4µm
+        #define FLOW_SMOOTHING_ALPHA      1.00f // Filtre léger (OV5640 moins bruité)
+        #define MIN_GRADIENT_THRESHOLD    5.0f  // Seuil plus bas (meilleur SNR)
+        #define MIN_VALID_PIXELS          120   // Moins de pixels requis
+    #endif
+
+    #ifdef USE_OV7725
+        // Configuration OV7725 (optimisée pour vitesse maximale)
+        #define CAMERA_MODEL        "OV7725"
+        #define CAMERA_PID          OV7725_PID
+        #define IMG_WIDTH           160
+        #define IMG_HEIGHT          120
+        #define CAMERA_FRAME_SIZE   FRAMESIZE_QQVGA
+        #define XCLK_FREQ           20000000    // 20MHz (requis pour OV7725)
+        #define FOCAL_LENGTH_PX     45.0f       // À calibrer
+        #define PIXEL_SIZE_MM       0.006f      // 6µm (pixels plus grands = moins de bruit)
+        #define FLOW_SMOOTHING_ALPHA      1.00f // Pas de filtrage pour réactivité maximale
+        #define MIN_GRADIENT_THRESHOLD    6.0f  // Seuil modéré
+        #define MIN_VALID_PIXELS          100   // Moins de pixels pour vitesse
+    #endif
+
+#endif  // USE_CAMERA
 
 // ============================================================================
 // Configuration commune
@@ -180,9 +230,15 @@ typedef struct {
 // ============================================================================
 // Variables globales
 // ============================================================================
+#ifdef USE_CAMERA
 static uint8_t *img_prev = NULL;
 static uint8_t *img_cur = NULL;
 static bool first_frame = true;
+#endif
+
+#ifdef USE_PMW3901
+static pmw3901_handle_t pmw3901_handle = NULL;
+#endif
 
 static volatile float global_flow_x = 0.0f;
 static volatile float global_flow_y = 0.0f;
@@ -375,8 +431,9 @@ static inline void read_lidar(void)
 }
 
 // ============================================================================
-// Flux optique Lucas-Kanade optimisé
+// Flux optique Lucas-Kanade optimisé (seulement si USE_CAMERA est activé)
 // ============================================================================
+#ifdef USE_CAMERA
 static void compute_optical_flow_optimized(uint8_t* prev, uint8_t* cur)
 {
     float sum_Ix2 = 0.0f;
@@ -455,10 +512,12 @@ static void compute_optical_flow_optimized(uint8_t* prev, uint8_t* cur)
         global_flow_y = 0.0f;
     }
 }
+#endif  // USE_CAMERA
 
 // ============================================================================
 // Initialisation caméra (OV2640 ou OV5640)
 // ============================================================================
+#ifdef USE_CAMERA
 static esp_err_t init_camera(void)
 {
     camera_config_t config = {
@@ -492,18 +551,40 @@ static esp_err_t init_camera(void)
         .grab_mode = CAMERA_GRAB_LATEST,
     };
     
+    ESP_LOGI(TAG, "Initializing camera...");
+    ESP_LOGI(TAG, "Expected camera: %s (PID=0x%x)", CAMERA_MODEL, CAMERA_PID);
+    ESP_LOGI(TAG, "XCLK frequency: %d MHz", XCLK_FREQ / 1000000);
+    ESP_LOGI(TAG, "I2C pins: SDA=%d, SCL=%d", CAM_PIN_SIOD, CAM_PIN_SIOC);
+
     esp_err_t err = esp_camera_init(&config);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Camera init failed: 0x%x", err);
+        ESP_LOGE(TAG, "Possible causes:");
+        ESP_LOGE(TAG, "  1. Camera not connected properly");
+        ESP_LOGE(TAG, "  2. Wrong camera model (try USE_OV2640 or USE_OV5640)");
+        ESP_LOGE(TAG, "  3. Power supply issue");
+        ESP_LOGE(TAG, "  4. I2C/SCCB communication problem");
         return err;
     }
-    
+
     sensor_t *s = esp_camera_sensor_get();
-    
+
+    // Afficher les informations du capteur détecté
+    ESP_LOGI(TAG, "Camera detected - PID: 0x%x, VER: 0x%x, MIDL: 0x%x, MIDH: 0x%x",
+             s->id.PID, s->id.VER, s->id.MIDL, s->id.MIDH);
+
     // Vérifier que le bon capteur est détecté
     if (s->id.PID != CAMERA_PID) {
         ESP_LOGW(TAG, "Camera PID mismatch! Expected 0x%x, got 0x%x", CAMERA_PID, s->id.PID);
-        ESP_LOGW(TAG, "Vérifiez que USE_OV2640, USE_OV5640 ou USE_OV7725 correspond à votre caméra");
+        ESP_LOGW(TAG, "La caméra détectée ne correspond pas à %s", CAMERA_MODEL);
+        ESP_LOGW(TAG, "Identifiez votre caméra:");
+        ESP_LOGW(TAG, "  PID 0x26 = OV2640");
+        ESP_LOGW(TAG, "  PID 0x5640 = OV5640");
+        ESP_LOGW(TAG, "  PID 0x77 = OV7725 (original)");
+        ESP_LOGW(TAG, "  PID 0x76 = OV7670");
+        ESP_LOGW(TAG, "Changez le #define dans main.c pour correspondre à votre caméra");
+    } else {
+        ESP_LOGI(TAG, "%s confirmed!", CAMERA_MODEL);
     }
 
     // Configuration commune
@@ -538,8 +619,8 @@ static esp_err_t init_camera(void)
     #endif
 
     // Configuration spécifique OV7725 (optimisée pour vitesse)
-    #ifdef USE_OV7725
-    if (s->id.PID == OV7725_PID) {
+    #if defined(USE_OV7725) 
+    if (s->id.PID == OV7725_PID ) {
         // OV7725 optimisations pour framerate maximal
         s->set_brightness(s, 0);      // Brightness neutre
         s->set_contrast(s, 0);        // Contrast neutre
@@ -551,16 +632,49 @@ static esp_err_t init_camera(void)
         s->set_raw_gma(s, 0);         // Pas de gamma correction
         s->set_dcw(s, 0);             // Pas de downsize
 
-        ESP_LOGI(TAG, "OV7725 configured for maximum speed");
+        ESP_LOGI(TAG, "%s configured for maximum speed", CAMERA_MODEL);
     }
     #endif
     
     return ESP_OK;
 }
+#endif  // USE_CAMERA
 
 // ============================================================================
-// CORE 0: Tâche caméra + flux optique
+// Initialisation PMW3901
 // ============================================================================
+#ifdef USE_PMW3901
+static esp_err_t init_pmw3901(void)
+{
+    pmw3901_config_t config = {
+        .spi_host = PMW3901_SPI_HOST,
+        .pin_cs = PMW3901_PIN_CS,
+        .pin_sck = PMW3901_PIN_SCK,
+        .pin_mosi = PMW3901_PIN_MOSI,
+        .pin_miso = PMW3901_PIN_MISO,
+    };
+
+    ESP_LOGI(TAG, "Initializing PMW3901 optical flow sensor...");
+
+    esp_err_t ret = pmw3901_init(&config, &pmw3901_handle);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "PMW3901 initialization failed: %d", ret);
+        return ret;
+    }
+
+    ESP_LOGI(TAG, "PMW3901 initialized successfully");
+
+    // Activer le LED du capteur (optionnel)
+    pmw3901_set_led(pmw3901_handle, true);
+
+    return ESP_OK;
+}
+#endif  // USE_PMW3901
+
+// ============================================================================
+// CORE 0: Tâche caméra + flux optique (seulement si USE_CAMERA)
+// ============================================================================
+#ifdef USE_CAMERA
 static void camera_task(void *pvParameters)
 {
     ESP_LOGI(TAG, "Camera task started on core %d", xPortGetCoreID());
@@ -629,6 +743,73 @@ static void camera_task(void *pvParameters)
         taskYIELD();
     }
 }
+#endif  // USE_CAMERA
+
+// ============================================================================
+// CORE 0: Tâche PMW3901 + flux optique (seulement si USE_PMW3901)
+// ============================================================================
+#ifdef USE_PMW3901
+static void pmw3901_task(void *pvParameters)
+{
+    ESP_LOGI(TAG, "PMW3901 task started on core %d", xPortGetCoreID());
+
+    pmw3901_motion_t motion;
+
+    while (1) {
+        int64_t timestamp = esp_timer_get_time();
+
+        // Lire les données du PMW3901
+        esp_err_t ret = pmw3901_read_motion(pmw3901_handle, &motion);
+
+        if (ret == ESP_OK) {
+            // Les valeurs delta sont en pixels depuis la dernière lecture
+            // Mise à jour du compteur de frames
+            frame_count++;
+            int64_t current_time = esp_timer_get_time();
+            if (current_time - last_stat_time >= 1000000) {
+                current_fps = (float)frame_count * 1000000.0f / (current_time - last_stat_time);
+                frame_count = 0;
+                last_stat_time = current_time;
+            }
+
+            // Convertir les deltas en flux optique
+            // Le PMW3901 retourne des déplacements cumulés en pixels
+            global_flow_x = (float)motion.delta_x * PMW3901_FLOW_SCALE;
+            global_flow_y = (float)motion.delta_y * PMW3901_FLOW_SCALE;
+
+            // Calcul de la vitesse si on a des données LiDAR valides
+            float velocity_x = 0.0f;
+            float velocity_y = 0.0f;
+
+            if (lidar_data.valid && current_fps > 1.0f) {
+                float distance_m = lidar_data.distance / 100.0f;
+                float dt = 1.0f / current_fps;
+
+                // Formule: vitesse (m/s) = (flux_pixels * distance * taille_pixel) / (focale * dt)
+                velocity_x = (global_flow_x * distance_m * PMW3901_PIXEL_SIZE_MM * 1000.0f) /
+                             (PMW3901_FOCAL_LENGTH_PX * dt);
+                velocity_y = (global_flow_y * distance_m * PMW3901_PIXEL_SIZE_MM * 1000.0f) /
+                             (PMW3901_FOCAL_LENGTH_PX * dt);
+            }
+
+            sensor_data_t data = {
+                .timestamp = timestamp,
+                .velocity_x = velocity_x,
+                .velocity_y = velocity_y,
+                .distance = lidar_data.distance,
+                .lidar_valid = lidar_data.valid,
+                .fps = current_fps
+            };
+
+            xQueueSend(dataQueue, &data, 0);
+        }
+
+        // Le PMW3901 peut échantillonner à ~121 FPS
+        // On peut mettre un délai réduit pour maximiser la vitesse
+        vTaskDelay(pdMS_TO_TICKS(8));  // ~125 Hz
+    }
+}
+#endif  // USE_PMW3901
 
 // ============================================================================
 // CORE 1: Tâche LiDAR + transmission
@@ -640,13 +821,24 @@ static void lidar_serial_task(void *pvParameters)
     sensor_data_t data;
 
     printf("\n=================================\n");
-    printf("ESP32-S3-CAM Optical Flow System\n");
+    printf("ESP32-S3 Optical Flow System\n");
+#ifdef USE_CAMERA
+    printf("Mode: Camera-based optical flow\n");
     printf("Camera: %s\n", CAMERA_MODEL);
-    printf("LiDAR: %s\n", LIDAR_MODEL);
     printf("Resolution: %dx%d\n", IMG_WIDTH, IMG_HEIGHT);
     printf("XCLK: %d MHz\n", XCLK_FREQ / 1000000);
     printf("Pixel size: %.4f mm\n", PIXEL_SIZE_MM);
     printf("Focal length: %.2f px\n", FOCAL_LENGTH_PX);
+#endif
+#ifdef USE_PMW3901
+    printf("Mode: PMW3901 optical flow sensor\n");
+    printf("Sensor: PMW3901\n");
+    printf("FOV: 42 degrees\n");
+    printf("Max rate: 121 FPS\n");
+    printf("Pixel size: %.4f mm\n", PMW3901_PIXEL_SIZE_MM);
+    printf("Focal length: %.2f px\n", PMW3901_FOCAL_LENGTH_PX);
+#endif
+    printf("LiDAR: %s\n", LIDAR_MODEL);
     printf("=================================\n");
     printf("Binary Protocol Mode\n");
     printf("Packet: [0xAA 0x55][ts(4)][vx(2)][vy(2)][dist(2)][chk(1)]\n");
@@ -672,36 +864,62 @@ static void lidar_serial_task(void *pvParameters)
 // ============================================================================
 void app_main(void)
 {
-    ESP_LOGI(TAG, "=== ESP32-S3-CAM Optical Flow + LiDAR ===");
+    ESP_LOGI(TAG, "=== ESP32-S3 Optical Flow + LiDAR ===");
+
+#ifdef USE_CAMERA
+    ESP_LOGI(TAG, "Mode: Camera-based optical flow");
     ESP_LOGI(TAG, "Camera selected: %s", CAMERA_MODEL);
-    
+
     ESP_ERROR_CHECK(init_camera());
     ESP_LOGI(TAG, "Camera initialized");
-    
+
     img_prev = (uint8_t *)heap_caps_malloc(IMG_WIDTH * IMG_HEIGHT, MALLOC_CAP_SPIRAM);
     img_cur = (uint8_t *)heap_caps_malloc(IMG_WIDTH * IMG_HEIGHT, MALLOC_CAP_SPIRAM);
-    
+
     if (!img_prev || !img_cur) {
         ESP_LOGE(TAG, "Failed to allocate memory");
         while(1) vTaskDelay(pdMS_TO_TICKS(1000));
     }
-    
+
     ESP_LOGI(TAG, "Memory allocated");
+#endif
+
+#ifdef USE_PMW3901
+    ESP_LOGI(TAG, "Mode: PMW3901 optical flow sensor");
+
+    ESP_ERROR_CHECK(init_pmw3901());
+    ESP_LOGI(TAG, "PMW3901 initialized");
+#endif
 
     init_lidar_uart();
 
     frameMutex = xSemaphoreCreateMutex();
     dataQueue = xQueueCreate(20, sizeof(sensor_data_t));
-    
+
     if (!frameMutex || !dataQueue) {
         ESP_LOGE(TAG, "Failed to create mutex/queue");
         return;
     }
-    
+
     last_stat_time = esp_timer_get_time();
-    
+
+#ifdef USE_CAMERA
     xTaskCreatePinnedToCore(camera_task, "CameraTask", 8192, NULL, 5, NULL, 0);
+    ESP_LOGI(TAG, "Camera task created on core 0");
+#endif
+
+#ifdef USE_PMW3901
+    xTaskCreatePinnedToCore(pmw3901_task, "PMW3901Task", 4096, NULL, 5, NULL, 0);
+    ESP_LOGI(TAG, "PMW3901 task created on core 0");
+#endif
+
     xTaskCreatePinnedToCore(lidar_serial_task, "LidarTask", 4096, NULL, 3, NULL, 1);
-    
+    ESP_LOGI(TAG, "LiDAR task created on core 1");
+
+#ifdef USE_CAMERA
     ESP_LOGI(TAG, "System running with %s", CAMERA_MODEL);
+#endif
+#ifdef USE_PMW3901
+    ESP_LOGI(TAG, "System running with PMW3901");
+#endif
 }

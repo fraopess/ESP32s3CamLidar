@@ -1,0 +1,26 @@
+{
+  "basic1": {
+    "build": {
+      "compileArgs": [],
+      "ninjaArgs": [],
+      "buildDirectoryPath": "/home/fra/claude/ESP32s3CamLidar/build",
+      "sdkconfigDefaults": [],
+      "sdkconfigFilePath": "/home/fra/claude/ESP32s3CamLidar/sdkconfig"
+    },
+    "env": {},
+    "flashBaudRate": "",
+    "idfTarget": "esp32s3",
+    "monitorBaudRate": "",
+    "openOCD": {
+      "debugLevel": -1,
+      "configs": [],
+      "args": []
+    },
+    "tasks": {
+      "preBuild": "",
+      "preFlash": "",
+      "postBuild": "",
+      "postFlash": ""
+    }
+  }
+}
