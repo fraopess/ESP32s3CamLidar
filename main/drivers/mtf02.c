@@ -14,23 +14,37 @@ static const char *TAG = "MTF02";
 
 // ============================================================================
 // Checksum validation for Micolink protocol
+// Per documentation: checksum = sum of all previous data (HEAD to PAYLOAD)
 // ============================================================================
 static bool micolink_check_sum(micolink_msg_t* msg)
 {
-    uint8_t length = msg->len + 6;
-    uint8_t temp[MICOLINK_MAX_LEN];
     uint8_t checksum = 0;
 
-    memcpy(temp, msg, length);
+    // Sum: HEAD + DEV_ID + SYS_ID + MSG_ID + SEQ + LEN
+    checksum += msg->head;
+    checksum += msg->dev_id;
+    checksum += msg->sys_id;
+    checksum += msg->msg_id;
+    checksum += msg->seq;
+    checksum += msg->len;
 
-    for (uint8_t i = 0; i < length; i++) {
-        checksum += temp[i];
+    // Sum all payload bytes
+    for (uint8_t i = 0; i < msg->len; i++) {
+        checksum += msg->payload[i];
     }
 
-    if (checksum == msg->checksum)
+    if (checksum == msg->checksum) {
         return true;
-    else
+    } else {
+        // static int debug_count = 0;
+        // if (debug_count < 3) {
+        //     debug_count++;
+        //     ESP_LOGI(TAG, "Checksum mismatch: calculated=0x%02X, received=0x%02X", checksum, msg->checksum);
+        //     ESP_LOGI(TAG, "  HEAD=0x%02X, DEV=0x%02X, SYS=0x%02X, MSG=0x%02X, SEQ=0x%02X, LEN=0x%02X",
+        //              msg->head, msg->dev_id, msg->sys_id, msg->msg_id, msg->seq, msg->len);
+        // }
         return false;
+    }
 }
 
 // ============================================================================
@@ -38,6 +52,9 @@ static bool micolink_check_sum(micolink_msg_t* msg)
 // ============================================================================
 static bool micolink_parse_char(micolink_msg_t* msg, uint8_t data)
 {
+    static int header_attempts = 0;
+    static bool logged_header_search = false;
+
     switch (msg->status)
     {
     case 0:
@@ -45,16 +62,37 @@ static bool micolink_parse_char(micolink_msg_t* msg, uint8_t data)
         {
             msg->head = data;
             msg->status++;
+            // if (!logged_header_search) {
+            //     logged_header_search = true;
+            //     ESP_LOGI(TAG, "Found header 0xEF after %d attempts", header_attempts);
+            // }
+            header_attempts = 0;
+        } else {
+            header_attempts++;
+            // if (header_attempts == 1) {
+            //     ESP_LOGI(TAG, "Searching for header 0xEF, received: 0x%02X", data);
+            // }
+            // if (header_attempts % 100 == 0) {
+            //     ESP_LOGI(TAG, "Still searching for header, attempt %d, last byte: 0x%02X", header_attempts, data);
+            // }
         }
         break;
 
     case 1:  // Device ID
         msg->dev_id = data;
+        // Validate device ID (optional - can be disabled if sensor uses different ID)
+        // if (data != MICOLINK_DEV_ID) {
+        //     ESP_LOGW(TAG, "Unexpected DEV_ID: 0x%02X (expected 0x%02X)", data, MICOLINK_DEV_ID);
+        // }
         msg->status++;
         break;
 
     case 2:  // System ID
         msg->sys_id = data;
+        // Validate system ID (optional - can be disabled if sensor uses different ID)
+        // if (data != MICOLINK_SYS_ID) {
+        //     ESP_LOGW(TAG, "Unexpected SYS_ID: 0x%02X (expected 0x%02X)", data, MICOLINK_SYS_ID);
+        // }
         msg->status++;
         break;
 
@@ -93,6 +131,13 @@ static bool micolink_parse_char(micolink_msg_t* msg, uint8_t data)
         if (micolink_check_sum(msg))
         {
             return true;
+        } else {
+            // static int checksum_failures = 0;
+            // checksum_failures++;
+            // if (checksum_failures <= 5 || checksum_failures % 50 == 0) {
+            //     ESP_LOGI(TAG, "Checksum failed (count: %d), msg_id: 0x%02X, len: %d, checksum: 0x%02X",
+            //              checksum_failures, msg->msg_id, msg->len, msg->checksum);
+            // }
         }
         break;
 
@@ -127,9 +172,42 @@ esp_err_t mtf02_init(uart_port_t uart_num, int tx_pin, int rx_pin, int buf_size)
 
     ret = uart_set_pin(uart_num, tx_pin, rx_pin, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
 
-    ESP_LOGI(TAG, "MTF-02 initialized on UART%d at %d baud", uart_num, MTF02_BAUDRATE);
+    // ESP_LOGI(TAG, "MTF-02 initialized:");
+    // ESP_LOGI(TAG, "  UART: %d", uart_num);
+    // ESP_LOGI(TAG, "  Baud: %d", MTF02_BAUDRATE);
+    // ESP_LOGI(TAG, "  TX Pin: %d", tx_pin);
+    // ESP_LOGI(TAG, "  RX Pin: %d", rx_pin);
+    // ESP_LOGI(TAG, "  Protocol: Micolink (header 0xEF)");
 
     return ret;
+}
+
+// ============================================================================
+// Send start measurement command to MTF-02 (experimental)
+// ============================================================================
+void mtf02_start_measurement(uart_port_t uart_num)
+{
+    // Try sending a simple command to start streaming
+    // This is experimental - MTF-02 might start automatically
+    // ESP_LOGI(TAG, "Attempting to start MTF-02 measurement...");
+
+    // Flush RX buffer first
+    uart_flush_input(uart_num);
+
+    // Some sensors need a newline or specific command
+    // We'll try a few common patterns
+    const char* commands[] = {
+        "\r\n",           // Newline
+        "START\r\n",      // Text command
+        NULL
+    };
+
+    for (int i = 0; commands[i] != NULL; i++) {
+        uart_write_bytes(uart_num, commands[i], strlen(commands[i]));
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+
+    // ESP_LOGI(TAG, "MTF-02 start commands sent");
 }
 
 // ============================================================================
@@ -139,11 +217,34 @@ void mtf02_read(uart_port_t uart_num, volatile mtf02_data_t* data, uint16_t max_
 {
     static micolink_msg_t msg = {0};
     static int packets_parsed = 0;
+    static int bytes_received = 0;
     static int64_t last_debug_time = 0;
+    static bool first_byte_received = false;
+    static uint8_t hex_dump[32];
+    static int hex_dump_count = 0;
     uint8_t byte;
 
     int count = 0;
     while (uart_read_bytes(uart_num, &byte, 1, 0) > 0 && count++ < 100) {
+        bytes_received++;
+
+        // if (!first_byte_received) {
+        //     first_byte_received = true;
+        //     ESP_LOGI(TAG, "First byte received: 0x%02X", byte);
+        // }
+
+        // // Collect first 64 bytes for hex dump (increased for better analysis)
+        // if (hex_dump_count < 32) {
+        //     hex_dump[hex_dump_count++] = byte;
+        //     if (hex_dump_count == 32) {
+        //         ESP_LOGI(TAG, "First 32 bytes received (hex dump):");
+        //         for (int i = 0; i < 32; i++) {
+        //             printf("0x%02X ", hex_dump[i]);
+        //             if ((i + 1) % 16 == 0) printf("\n");
+        //         }
+        //         printf("\n");
+        //     }
+        // }
 
         if (micolink_parse_char(&msg, byte) == false)
             continue;
@@ -181,10 +282,26 @@ void mtf02_read(uart_port_t uart_num, volatile mtf02_data_t* data, uint16_t max_
                 data->flow_vel_y = payload.flow_vel_y;
                 data->flow_quality = payload.flow_quality;
 
-                // Check if flow data is valid (status and quality checks)
-                data->flow_valid = (payload.flow_status == 0) && (payload.flow_quality > 0);
+                // Check if flow data is valid
+                // Note: flow_status seems to be 1 when flow is active (not 0)
+                // Use quality threshold instead
+                data->flow_valid = (payload.flow_quality >= MTF02_FLOW_QUALITY_MIN);
 
                 packets_parsed++;
+
+                // // Debug: Log optical flow data periodically
+                // static int flow_debug_count = 0;
+                // flow_debug_count++;
+                // if (flow_debug_count % 30 == 0) {
+                //     ESP_LOGI(TAG, "=== MTF-02 Raw Data ===");
+                //     ESP_LOGI(TAG, "Distance: %d mm, Strength: %d", payload.distance, payload.strength);
+                //     ESP_LOGI(TAG, "Flow vel_x: %d, vel_y: %d (cm/s @ 1m)", payload.flow_vel_x, payload.flow_vel_y);
+                //     ESP_LOGI(TAG, "Flow quality: %d, status: %d", payload.flow_quality, payload.flow_status);
+                //     ESP_LOGI(TAG, "Flow valid: %d (quality>=%d: %d)",
+                //              data->flow_valid,
+                //              MTF02_FLOW_QUALITY_MIN,
+                //              (payload.flow_quality >= MTF02_FLOW_QUALITY_MIN));
+                // }
                 break;
             }
 
@@ -193,16 +310,17 @@ void mtf02_read(uart_port_t uart_num, volatile mtf02_data_t* data, uint16_t max_
         }
     }
 
-    // Statistics output every 1 second
-    int64_t current_time = esp_timer_get_time();
-    if (current_time - last_debug_time >= 1000000) {
-        if (packets_parsed > 0) {
-            ESP_LOGI(TAG, "Packets/sec: %d, Distance: %d cm, Flow: (%d, %d), Quality: %d",
-                     packets_parsed, data->distance, data->flow_vel_x, data->flow_vel_y, data->flow_quality);
-        }
-        packets_parsed = 0;
-        last_debug_time = current_time;
-    }
+    // Statistics output every 1 second (commented out for production)
+    // int64_t current_time = esp_timer_get_time();
+    // if (current_time - last_debug_time >= 1000000) {
+    //     ESP_LOGI(TAG, "Stats: %d bytes/s, %d packets/s | Distance: %d cm, Flow: (%d, %d), Quality: %d, Valid: %d/%d",
+    //              bytes_received, packets_parsed,
+    //              data->distance, data->flow_vel_x, data->flow_vel_y,
+    //              data->flow_quality, data->valid, data->flow_valid);
+    //     packets_parsed = 0;
+    //     bytes_received = 0;
+    //     last_debug_time = current_time;
+    // }
 }
 
 // ============================================================================

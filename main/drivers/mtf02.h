@@ -17,9 +17,12 @@ extern "C" {
 
 // MTF-02 Configuration
 #define MTF02_BAUDRATE           115200  // Default baudrate, adjust if needed
+#define MTF02_FLOW_QUALITY_MIN   30      // Minimum optical flow quality threshold (0-255)
 
-// Micolink Protocol Constants
+// Micolink Protocol Constants (from MTF-01/02 documentation)
 #define MICOLINK_MSG_HEAD            0xEF
+#define MICOLINK_DEV_ID              0x0F  // Expected device ID
+#define MICOLINK_SYS_ID              0x00  // Expected system ID
 #define MICOLINK_MAX_PAYLOAD_LEN     64
 #define MICOLINK_MAX_LEN             (MICOLINK_MAX_PAYLOAD_LEN + 7)
 
@@ -82,6 +85,13 @@ typedef struct {
  * @return ESP error code
  */
 esp_err_t mtf02_init(uart_port_t uart_num, int tx_pin, int rx_pin, int buf_size);
+
+/**
+ * @brief Send start command to MTF-02 (if needed)
+ *
+ * @param uart_num UART port number
+ */
+void mtf02_start_measurement(uart_port_t uart_num);
 
 /**
  * @brief Read and parse MTF-02 data

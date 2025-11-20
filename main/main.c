@@ -574,11 +574,25 @@ static void mtf02_task(void *pvParameters)
     ESP_LOGI(TAG, "MTF-02 task started on core %d", xPortGetCoreID());
 
     sensor_data_t data;
+    int loop_count = 0;
+    static bool first_valid_data = true;
 
     while (1) {
         read_lidar();
 
+        // loop_count++;
+        // if (loop_count % 100 == 0) {
+        //     ESP_LOGI(TAG, "MTF-02 task alive, loop: %d, valid: %d", loop_count, lidar_data.valid);
+        // }
+
         if (lidar_data.valid) {
+            // if (first_valid_data) {
+            //     first_valid_data = false;
+            //     ESP_LOGI(TAG, "First valid MTF-02 data received!");
+            //     ESP_LOGI(TAG, "  Distance: %d cm", lidar_data.distance);
+            //     ESP_LOGI(TAG, "  Flow: (%d, %d)", lidar_data.flow_vel_x, lidar_data.flow_vel_y);
+            // }
+
             int64_t timestamp = esp_timer_get_time();
 
             // Mise à jour du compteur de frames
@@ -598,6 +612,27 @@ static void mtf02_task(void *pvParameters)
                 float height_m = lidar_data.distance / 100.0f;
                 mtf02_get_flow_velocity(&lidar_data, &velocity_x, &velocity_y, height_m);
             }
+
+            // // Debug: Log calculated velocities periodically
+            // static int vel_debug_count = 0;
+            // vel_debug_count++;
+            // if (vel_debug_count % 30 == 0) {
+            //     ESP_LOGI(TAG, "=== MTF-02 Calculated Velocities ===");
+            //     ESP_LOGI(TAG, "Conditions: flow_valid=%d, distance=%d cm",
+            //              lidar_data.flow_valid, lidar_data.distance);
+            //     ESP_LOGI(TAG, "Raw flow: vel_x=%d, vel_y=%d (cm/s @ 1m)",
+            //              lidar_data.flow_vel_x, lidar_data.flow_vel_y);
+            //     if (lidar_data.distance > 0) {
+            //         float height_m = lidar_data.distance / 100.0f;
+            //         ESP_LOGI(TAG, "Height: %.2f m", height_m);
+            //         ESP_LOGI(TAG, "Expected vx: %.3f m/s, vy: %.3f m/s",
+            //                  (lidar_data.flow_vel_x * height_m) / 100.0f,
+            //                  (lidar_data.flow_vel_y * height_m) / 100.0f);
+            //     }
+            //     ESP_LOGI(TAG, "Final: vx=%.3f m/s, vy=%.3f m/s", velocity_x, velocity_y);
+            //     ESP_LOGI(TAG, "Packet values: vx=%d, vy=%d (x1000)",
+            //              (int16_t)(velocity_x * 1000.0f), (int16_t)(velocity_y * 1000.0f));
+            // }
 
             data.timestamp = timestamp;
             data.velocity_x = velocity_x;
@@ -619,9 +654,11 @@ static void mtf02_task(void *pvParameters)
 // ============================================================================
 static void lidar_serial_task(void *pvParameters)
 {
-    // ESP_LOGI(TAG, "LiDAR/Serial task started on core %d", xPortGetCoreID());
+    ESP_LOGI(TAG, "LiDAR/Serial task started on core %d", xPortGetCoreID());
 
     sensor_data_t data;
+    static int packets_sent = 0;
+    static bool first_packet_sent = false;
 
     // printf("\n=================================\n");
     // printf("ESP32-S3 Optical Flow System\n");
@@ -656,9 +693,21 @@ static void lidar_serial_task(void *pvParameters)
 #ifdef USE_MTF02
         // Mode MTF-02 avec flux optique intégré - données reçues via queue
         if (xQueueReceive(dataQueue, &data, pdMS_TO_TICKS(10)) == pdTRUE) {
+            // if (!first_packet_sent) {
+            //     first_packet_sent = true;
+            //     ESP_LOGI(TAG, "First packet from queue received and sending!");
+            //     ESP_LOGI(TAG, "  Vel: (%.3f, %.3f) m/s, Dist: %d cm",
+            //              data.velocity_x, data.velocity_y, data.distance);
+            // }
+
             uint32_t timestamp_ms = (uint32_t)(data.timestamp / 1000);
             send_binary_packet(timestamp_ms, data.velocity_x, data.velocity_y,
                              data.lidar_valid ? data.distance : 0);
+            // packets_sent++;
+
+            // if (packets_sent % 100 == 0) {
+            //     ESP_LOGI(TAG, "Packets sent: %d, FPS: %.1f", packets_sent, data.fps);
+            // }
         }
         vTaskDelay(pdMS_TO_TICKS(1));
 #else
@@ -693,15 +742,15 @@ static void lidar_serial_task(void *pvParameters)
 void app_main(void)
 {
     // Very first output - should appear immediately
-    // printf("\n\n\n*** APP_MAIN STARTED ***\n");
-    // printf("*** UART OUTPUT TEST ***\n");
-    // printf("*** If you see this, UART is working! ***\n\n");
+    printf("\n\n\n*** APP_MAIN STARTED ***\n");
+    printf("*** UART OUTPUT TEST ***\n");
+    printf("*** If you see this, UART is working! ***\n\n");
 
-    // ESP_LOGI(TAG, "=== ESP32-S3 Optical Flow + LiDAR ===");
+    ESP_LOGI(TAG, "=== ESP32-S3 Optical Flow + LiDAR ===");
 
-// #ifdef LIDAR_ONLY_MODE
-    // ESP_LOGI(TAG, "Mode: LiDAR only (no optical flow sensor)");
-// #endif
+#ifdef LIDAR_ONLY_MODE
+    ESP_LOGI(TAG, "Mode: LiDAR only (no optical flow sensor)");
+#endif
 
 #ifdef USE_CAMERA
     // ESP_LOGI(TAG, "Mode: Camera-based optical flow");
@@ -735,12 +784,18 @@ void app_main(void)
 #endif
 
 #ifdef USE_MTF02
+    // Try to start MTF-02 measurement (may not be needed)
+    vTaskDelay(pdMS_TO_TICKS(200));  // Wait for sensor to be ready
+    mtf02_start_measurement(LIDAR_UART_NUM);
+
+    ESP_LOGI(TAG, "Mode: MTF-02 integrated distance + optical flow sensor");
     // MTF-02 has integrated optical flow, create queue for data
     dataQueue = xQueueCreate(20, sizeof(sensor_data_t));
     if (!dataQueue) {
-        // ESP_LOGE(TAG, "Failed to create queue");
+        ESP_LOGE(TAG, "Failed to create queue");
         return;
     }
+    ESP_LOGI(TAG, "MTF-02 queue created successfully");
 #else
 #ifndef LIDAR_ONLY_MODE
     frameMutex = xSemaphoreCreateMutex();
@@ -775,26 +830,29 @@ void app_main(void)
 
 #ifdef USE_MTF02
     xTaskCreatePinnedToCore(mtf02_task, "MTF02Task", 4096, NULL, 5, NULL, 0);
-    // ESP_LOGI(TAG, "MTF-02 task created on core 0");
+    ESP_LOGI(TAG, "MTF-02 task created on core 0");
 #endif
 
     xTaskCreatePinnedToCore(lidar_serial_task, "LidarTask", 4096, NULL, 3, NULL, 1);
-    // ESP_LOGI(TAG, "LiDAR task created on core 1");
+    ESP_LOGI(TAG, "LiDAR task created on core 1");
 
-// #ifdef USE_CAMERA
-    // ESP_LOGI(TAG, "System running with %s", CAMERA_MODEL);
-// #endif
-// #ifdef USE_PMW3901
-    // if (pmw3901_handle != NULL) {
-        // ESP_LOGI(TAG, "System running with PMW3901");
-    // }
-// #endif
-// #ifdef LIDAR_ONLY_MODE
-    // ESP_LOGI(TAG, "System running with LiDAR only");
-// #endif
+#ifdef USE_CAMERA
+    ESP_LOGI(TAG, "System running with %s", CAMERA_MODEL);
+#endif
+#ifdef USE_PMW3901
+    if (pmw3901_handle != NULL) {
+        ESP_LOGI(TAG, "System running with PMW3901");
+    }
+#endif
+#ifdef USE_MTF02
+    ESP_LOGI(TAG, "System running with %s", LIDAR_MODEL);
+#endif
+#ifdef LIDAR_ONLY_MODE
+    ESP_LOGI(TAG, "System running with LiDAR only");
+#endif
 
-    // ESP_LOGI(TAG, "*** Initialization complete ***");
-    // ESP_LOGI(TAG, "System running - binary data streaming...");
+    ESP_LOGI(TAG, "*** Initialization complete ***");
+    ESP_LOGI(TAG, "System running - binary data streaming...");
 
     // Keep app_main alive
     while (1) {
