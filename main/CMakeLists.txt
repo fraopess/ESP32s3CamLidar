@@ -1,7 +1,7 @@
 # main/CMakeLists.txt
 idf_component_register(
     SRCS "main.c"
-         "pmw3901.c"
+         "drivers/pmw3901.c"
          "drivers/dts6012m.c"
          "drivers/tfmini.c"
          "drivers/camera_optical_flow.c"

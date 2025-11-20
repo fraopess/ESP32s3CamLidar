@@ -45,16 +45,17 @@
 // SÉLECTION DU LIDAR (décommenter UNE SEULE ligne)
 // ============================================================================
 //#define USE_TFMINI    // Décommenter pour TFMini (115200 baud)
-#define USE_DTS6012M  // Décommenter pour DTS6012M (921600 baud, haute vitesse)
+//#define USE_DTS6012M  // Décommenter pour DTS6012M (921600 baud, haute vitesse)
+#define USE_MTF02     // Décommenter pour MTF-02 (115200 baud, distance + flux optique intégré)
 
 // ============================================================================
 // Vérification configuration lidar
 // ============================================================================
-#if (defined(USE_TFMINI) + defined(USE_DTS6012M)) > 1
+#if (defined(USE_TFMINI) + defined(USE_DTS6012M) + defined(USE_MTF02)) > 1
     #error "ERREUR: Sélectionnez UN SEUL lidar!"
 #endif
 
-#if !defined(USE_TFMINI) && !defined(USE_DTS6012M)
+#if !defined(USE_TFMINI) && !defined(USE_DTS6012M) && !defined(USE_MTF02)
     #error "ERREUR: Sélectionnez un lidar (décommentez une ligne)"
 #endif
 
@@ -80,7 +81,7 @@
 #endif
 
 #ifdef USE_PMW3901
-#include "pmw3901.h"
+#include "drivers/pmw3901.h"
 #endif
 
 #ifdef USE_TFMINI
@@ -89,6 +90,10 @@
 
 #ifdef USE_DTS6012M
 #include "drivers/dts6012m.h"
+#endif
+
+#ifdef USE_MTF02
+#include "drivers/mtf02.h"
 #endif
 
 static const char *TAG = "OPTICAL_FLOW";
@@ -136,6 +141,11 @@ static const char *TAG = "OPTICAL_FLOW";
     #define LIDAR_MODEL        "DTS6012M"
 #endif
 
+#ifdef USE_MTF02
+    #define LIDAR_BAUDRATE     115200    // MTF-02 default (adjust if needed)
+    #define LIDAR_MODEL        "MTF-02"
+#endif
+
 // ============================================================================
 // Configuration SPI PMW3901 (Optical Flow Sensor)
 // ============================================================================
@@ -144,7 +154,7 @@ static const char *TAG = "OPTICAL_FLOW";
     #define PMW3901_PIN_CS     1    // À adapter selon votre câblage
     #define PMW3901_PIN_SCK    2    // À adapter selon votre câblage
     #define PMW3901_PIN_MOSI   3    // À adapter selon votre câblage
-    #define PMW3901_PIN_MISO   21   // À adapter selon votre câblage
+    #define PMW3901_PIN_MISO   4   // À adapter selon votre câblage
 
     // Paramètres du capteur PMW3901
     #define PMW3901_FOCAL_LENGTH_PX    42.0f     // FOV de 42°, ~35x35 pixels effectifs
@@ -259,6 +269,10 @@ static volatile tfmini_data_t lidar_data = {0, 0, false};
 static volatile dts6012m_data_t lidar_data = {0, 0, false};
 #endif
 
+#ifdef USE_MTF02
+static volatile mtf02_data_t lidar_data = {0, 0, false, 0, 0, 0, false};
+#endif
+
 static volatile uint32_t frame_count = 0;
 static volatile int64_t last_stat_time = 0;
 static volatile float current_fps = 0.0f;
@@ -316,6 +330,10 @@ static void init_lidar_uart(void)
 #ifdef USE_DTS6012M
     ESP_ERROR_CHECK(dts6012m_init(LIDAR_UART_NUM, LIDAR_TX_PIN, LIDAR_RX_PIN, LIDAR_BUF_SIZE));
 #endif
+
+#ifdef USE_MTF02
+    ESP_ERROR_CHECK(mtf02_init(LIDAR_UART_NUM, LIDAR_TX_PIN, LIDAR_RX_PIN, LIDAR_BUF_SIZE));
+#endif
 }
 
 
@@ -330,6 +348,9 @@ static inline void read_lidar(void)
 #endif
 #ifdef USE_DTS6012M
     dts6012m_read(LIDAR_UART_NUM, &lidar_data, MAX_VALID_DISTANCE_CM);
+#endif
+#ifdef USE_MTF02
+    mtf02_read(LIDAR_UART_NUM, &lidar_data, MAX_VALID_DISTANCE_CM);
 #endif
 }
 
@@ -545,6 +566,55 @@ static void pmw3901_task(void *pvParameters)
 #endif  // USE_PMW3901
 
 // ============================================================================
+// CORE 0: Tâche MTF-02 (distance + flux optique intégré)
+// ============================================================================
+#ifdef USE_MTF02
+static void mtf02_task(void *pvParameters)
+{
+    ESP_LOGI(TAG, "MTF-02 task started on core %d", xPortGetCoreID());
+
+    sensor_data_t data;
+
+    while (1) {
+        read_lidar();
+
+        if (lidar_data.valid) {
+            int64_t timestamp = esp_timer_get_time();
+
+            // Mise à jour du compteur de frames
+            frame_count++;
+            int64_t current_time = esp_timer_get_time();
+            if (current_time - last_stat_time >= 1000000) {
+                current_fps = (float)frame_count * 1000000.0f / (current_time - last_stat_time);
+                frame_count = 0;
+                last_stat_time = current_time;
+            }
+
+            // Calculer la vitesse à partir du flux optique intégré
+            float velocity_x = 0.0f;
+            float velocity_y = 0.0f;
+
+            if (lidar_data.flow_valid && lidar_data.distance > 0) {
+                float height_m = lidar_data.distance / 100.0f;
+                mtf02_get_flow_velocity(&lidar_data, &velocity_x, &velocity_y, height_m);
+            }
+
+            data.timestamp = timestamp;
+            data.velocity_x = velocity_x;
+            data.velocity_y = velocity_y;
+            data.distance = lidar_data.distance;
+            data.lidar_valid = lidar_data.valid;
+            data.fps = current_fps;
+
+            xQueueSend(dataQueue, &data, 0);
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(10));  // ~100 Hz
+    }
+}
+#endif  // USE_MTF02
+
+// ============================================================================
 // CORE 1: Tâche LiDAR + transmission
 // ============================================================================
 static void lidar_serial_task(void *pvParameters)
@@ -583,6 +653,15 @@ static void lidar_serial_task(void *pvParameters)
     vTaskDelay(pdMS_TO_TICKS(500));
 
     while (1) {
+#ifdef USE_MTF02
+        // Mode MTF-02 avec flux optique intégré - données reçues via queue
+        if (xQueueReceive(dataQueue, &data, pdMS_TO_TICKS(10)) == pdTRUE) {
+            uint32_t timestamp_ms = (uint32_t)(data.timestamp / 1000);
+            send_binary_packet(timestamp_ms, data.velocity_x, data.velocity_y,
+                             data.lidar_valid ? data.distance : 0);
+        }
+        vTaskDelay(pdMS_TO_TICKS(1));
+#else
         read_lidar();
 
 #ifdef LIDAR_ONLY_MODE
@@ -603,6 +682,7 @@ static void lidar_serial_task(void *pvParameters)
         }
 
         vTaskDelay(pdMS_TO_TICKS(1));
+#endif
 #endif
     }
 }
@@ -654,6 +734,14 @@ void app_main(void)
     dts6012m_start_measurement(LIDAR_UART_NUM);
 #endif
 
+#ifdef USE_MTF02
+    // MTF-02 has integrated optical flow, create queue for data
+    dataQueue = xQueueCreate(20, sizeof(sensor_data_t));
+    if (!dataQueue) {
+        // ESP_LOGE(TAG, "Failed to create queue");
+        return;
+    }
+#else
 #ifndef LIDAR_ONLY_MODE
     frameMutex = xSemaphoreCreateMutex();
     dataQueue = xQueueCreate(20, sizeof(sensor_data_t));
@@ -669,6 +757,7 @@ void app_main(void)
         return;
     }
 #endif
+#endif
 
     last_stat_time = esp_timer_get_time();
 
@@ -682,6 +771,11 @@ void app_main(void)
         xTaskCreatePinnedToCore(pmw3901_task, "PMW3901Task", 4096, NULL, 5, NULL, 0);
         // ESP_LOGI(TAG, "PMW3901 task created on core 0");
     }
+#endif
+
+#ifdef USE_MTF02
+    xTaskCreatePinnedToCore(mtf02_task, "MTF02Task", 4096, NULL, 5, NULL, 0);
+    // ESP_LOGI(TAG, "MTF-02 task created on core 0");
 #endif
 
     xTaskCreatePinnedToCore(lidar_serial_task, "LidarTask", 4096, NULL, 3, NULL, 1);

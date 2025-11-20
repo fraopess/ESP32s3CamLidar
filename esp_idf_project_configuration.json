@@ -8,8 +8,8 @@
       "sdkconfigFilePath": "/home/fra/claude/ESP32s3CamLidar/sdkconfig"
     },
     "env": {},
-    "flashBaudRate": "",
     "idfTarget": "esp32s3",
+    "flashBaudRate": "",
     "monitorBaudRate": "",
     "openOCD": {
       "debugLevel": -1,
