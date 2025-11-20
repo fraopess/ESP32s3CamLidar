@@ -4,6 +4,7 @@ idf_component_register(
          "drivers/pmw3901.c"
          "drivers/dts6012m.c"
          "drivers/tfmini.c"
+         "drivers/mtf02.c"
          "drivers/camera_optical_flow.c"
     INCLUDE_DIRS "." "drivers"
     REQUIRES
