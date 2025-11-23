@@ -10,7 +10,7 @@
 // SÉLECTION DU MODE DE FLUX OPTIQUE (décommenter UNE SEULE ligne)
 // ============================================================================
 //#define USE_CAMERA        // Utiliser la caméra pour le flux optique
-//#define USE_PMW3901       // Utiliser le capteur PMW3901 pour le flux optique
+#define USE_PMW3901       // Utiliser le capteur PMW3901 pour le flux optique
 
 // ============================================================================
 // SÉLECTION DE LA CAMÉRA (seulement si USE_CAMERA est activé)
@@ -45,8 +45,8 @@
 // SÉLECTION DU LIDAR (décommenter UNE SEULE ligne)
 // ============================================================================
 //#define USE_TFMINI    // Décommenter pour TFMini (115200 baud)
-//#define USE_DTS6012M  // Décommenter pour DTS6012M (921600 baud, haute vitesse)
-#define USE_MTF02     // Décommenter pour MTF-02 (115200 baud, distance + flux optique intégré)
+#define USE_DTS6012M  // Décommenter pour DTS6012M (921600 baud, haute vitesse)
+//#define USE_MTF02     // Décommenter pour MTF-02 (115200 baud, distance + flux optique intégré)
 
 // ============================================================================
 // Vérification configuration lidar
@@ -151,16 +151,20 @@ static const char *TAG = "OPTICAL_FLOW";
 // ============================================================================
 #ifdef USE_PMW3901
     #define PMW3901_SPI_HOST   SPI2_HOST
-    #define PMW3901_PIN_CS     1    // À adapter selon votre câblage
-    #define PMW3901_PIN_SCK    2    // À adapter selon votre câblage
-    #define PMW3901_PIN_MOSI   3    // À adapter selon votre câblage
-    #define PMW3901_PIN_MISO   4   // À adapter selon votre câblage
+    #define PMW3901_PIN_CS     10    // À adapter selon votre câblage
+    #define PMW3901_PIN_SCK    12    // À adapter selon votre câblage
+    #define PMW3901_PIN_MISO   11    // Try swapping MISO/MOSI if getting 0x00
+    #define PMW3901_PIN_MOSI   13    // Try swapping MISO/MOSI if getting 0x00
 
     // Paramètres du capteur PMW3901
     #define PMW3901_FOCAL_LENGTH_PX    42.0f     // FOV de 42°, ~35x35 pixels effectifs
     #define PMW3901_PIXEL_SIZE_MM      0.030f    // Estimation basée sur FOV
     #define PMW3901_MAX_DELTA          127       // Valeur maximale de delta (8-bit signé)
     #define PMW3901_FLOW_SCALE         1.0f      // Facteur d'échelle pour le flux
+    #define PMW3901_ALPHA 0.1f               // Complementary filter coefficient
+
+    // Mode de lecture: burst mode enabled (faster single-transaction read)
+    //#define PMW3901_USE_BURST_MODE
 #endif
 
 // ============================================================================
@@ -416,7 +420,7 @@ static esp_err_t init_pmw3901(void)
 
     ESP_LOGI(TAG, "PMW3901 initialized successfully");
 
-    // Activer le LED du capteur (optionnel)
+    // Activer le LED du capteur
     pmw3901_set_led(pmw3901_handle, true);
 
     return ESP_OK;
@@ -508,12 +512,17 @@ static void pmw3901_task(void *pvParameters)
     ESP_LOGI(TAG, "PMW3901 task started on core %d", xPortGetCoreID());
 
     pmw3901_motion_t motion;
+    static int debug_count = 0;
 
     while (1) {
         int64_t timestamp = esp_timer_get_time();
 
         // Lire les données du PMW3901
+#ifdef PMW3901_USE_BURST_MODE
+        esp_err_t ret = pmw3901_read_motion_burst(pmw3901_handle, &motion);
+#else
         esp_err_t ret = pmw3901_read_motion(pmw3901_handle, &motion);
+#endif
 
         if (ret == ESP_OK) {
             // Les valeurs delta sont en pixels depuis la dernière lecture
@@ -531,7 +540,11 @@ static void pmw3901_task(void *pvParameters)
             global_flow_x = (float)motion.delta_x * PMW3901_FLOW_SCALE;
             global_flow_y = (float)motion.delta_y * PMW3901_FLOW_SCALE;
 
-            // Calcul de la vitesse si on a des données LiDAR valides
+            // Velocity calculation with complementary filter
+            static float smooth_velocity_x = 0.0f;
+            static float smooth_velocity_y = 0.0f;
+            
+
             float velocity_x = 0.0f;
             float velocity_y = 0.0f;
 
@@ -539,11 +552,24 @@ static void pmw3901_task(void *pvParameters)
                 float distance_m = lidar_data.distance / 100.0f;
                 float dt = 1.0f / current_fps;
 
-                // Formule: vitesse (m/s) = (flux_pixels * distance * taille_pixel) / (focale * dt)
-                velocity_x = (global_flow_x * distance_m * PMW3901_PIXEL_SIZE_MM * 1000.0f) /
-                             (PMW3901_FOCAL_LENGTH_PX * dt);
-                velocity_y = (global_flow_y * distance_m * PMW3901_PIXEL_SIZE_MM * 1000.0f) /
-                             (PMW3901_FOCAL_LENGTH_PX * dt);
+                // Direct formula: velocity (m/s) = (pixels * distance * pixel_size) / (focal_length * dt)
+                float raw_vel_x = (global_flow_x * distance_m * PMW3901_PIXEL_SIZE_MM * 1000.0f) /
+                                  (PMW3901_FOCAL_LENGTH_PX * dt);
+                float raw_vel_y = (global_flow_y * distance_m * PMW3901_PIXEL_SIZE_MM * 1000.0f) /
+                                  (PMW3901_FOCAL_LENGTH_PX * dt);
+
+                // Apply complementary filter: output = alpha * new + (1-alpha) * previous
+                smooth_velocity_x = PMW3901_ALPHA * raw_vel_x + (1.0f - PMW3901_ALPHA) * smooth_velocity_x;
+                smooth_velocity_y = PMW3901_ALPHA * raw_vel_y + (1.0f - PMW3901_ALPHA) * smooth_velocity_y;
+
+                velocity_x = smooth_velocity_x;
+                velocity_y = smooth_velocity_y;
+            } else {
+                // Decay to zero when no valid data
+                smooth_velocity_x *= 0.9f;
+                smooth_velocity_y *= 0.9f;
+                velocity_x = smooth_velocity_x;
+                velocity_y = smooth_velocity_y;
             }
 
             sensor_data_t data = {
@@ -556,6 +582,28 @@ static void pmw3901_task(void *pvParameters)
             };
 
             xQueueSend(dataQueue, &data, 0);
+
+            // Debug output every 50 iterations or when motion detected
+            // debug_count++;
+            // if (motion.motion || debug_count >= 50) {
+            //     if (debug_count >= 50) debug_count = 0;
+
+            //     ESP_LOGI(TAG, "=== PMW3901 Flow Data ===");
+            //     ESP_LOGI(TAG, "Motion: %d, SQUAL: %d, FPS: %.1f",
+            //              motion.motion, motion.squal, current_fps);
+            //     ESP_LOGI(TAG, "Raw delta: dx=%d, dy=%d pixels",
+            //              motion.delta_x, motion.delta_y);
+            //     ESP_LOGI(TAG, "Flow: fx=%.2f, fy=%.2f",
+            //              global_flow_x, global_flow_y);
+            //     ESP_LOGI(TAG, "LiDAR: valid=%d, dist=%d cm",
+            //              lidar_data.valid, lidar_data.distance);
+            //     if (lidar_data.valid) {
+            //         ESP_LOGI(TAG, "Velocity: vx=%.3f, vy=%.3f m/s",
+            //                  velocity_x, velocity_y);
+            //     } else {
+            //         ESP_LOGI(TAG, "Velocity: N/A (no LiDAR data)");
+            //     }
+            // }
         }
 
         // Le PMW3901 peut échantillonner à ~121 FPS
@@ -768,10 +816,7 @@ void app_main(void)
 
     esp_err_t ret = init_pmw3901();
     if (ret != ESP_OK) {
-        // ESP_LOGE(TAG, "PMW3901 initialization failed. Continuing in LiDAR-only mode.");
-        // Don't halt - continue with LiDAR only
-    } else {
-        // ESP_LOGI(TAG, "PMW3901 initialized");
+        ESP_LOGE(TAG, "PMW3901 initialization failed. Continuing in LiDAR-only mode.");
     }
 #endif
 

@@ -81,7 +81,15 @@ typedef struct pmw3901_handle_s* pmw3901_handle_t;
 esp_err_t pmw3901_init(const pmw3901_config_t* config, pmw3901_handle_t* handle);
 
 /**
- * @brief Lit les données de mouvement
+ * @brief Lit les données de mouvement (direct pixel displacement)
+ *
+ * Returns near-raw pixel displacement with minimal filtering:
+ * 1. SQUAL-based quality check (threshold=5)
+ * 2. Dead zone DISABLED (detects all movements)
+ * 3. Outlier clamping only (max 100 pixels/sample)
+ *
+ * No median filtering or smoothing - direct sensor output.
+ * Convert to velocity using pmw3901_calculate_velocity() helper.
  *
  * @param handle Handle du capteur
  * @param motion Structure pour recevoir les données
@@ -106,6 +114,37 @@ esp_err_t pmw3901_set_led(pmw3901_handle_t handle, bool led_on);
  * @return ESP_OK en cas de succès
  */
 esp_err_t pmw3901_read_id(pmw3901_handle_t handle, uint8_t* product_id);
+
+/**
+ * @brief Lit les données de mouvement en mode burst (PLUS RAPIDE!)
+ *
+ * Lit tous les registres en une seule transaction SPI (plus rapide que
+ * pmw3901_read_motion). Returns direct pixel displacement.
+ *
+ * Use this for high-frequency sampling or when you need minimal latency.
+ *
+ * @param handle Handle du capteur
+ * @param motion Structure pour recevoir les données
+ * @return ESP_OK en cas de succès
+ */
+esp_err_t pmw3901_read_motion_burst(pmw3901_handle_t handle, pmw3901_motion_t* motion);
+
+/**
+ * @brief Calculate velocity from optical flow displacement
+ *
+ * Helper function to convert pixel displacement to velocity (m/s).
+ * Uses standard PMW3901 physical constants (24um pixel, ~1400px focal length).
+ *
+ * @param delta_x X displacement in pixels
+ * @param delta_y Y displacement in pixels
+ * @param distance_m Distance to surface in meters
+ * @param dt Time interval in seconds
+ * @param velocity_x Output X velocity in m/s
+ * @param velocity_y Output Y velocity in m/s
+ */
+void pmw3901_calculate_velocity(int16_t delta_x, int16_t delta_y,
+                                float distance_m, float dt,
+                                float* velocity_x, float* velocity_y);
 
 /**
  * @brief Libère les ressources
