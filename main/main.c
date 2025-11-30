@@ -9,14 +9,14 @@
 // ============================================================================
 // SÉLECTION DU MODE DE FLUX OPTIQUE (décommenter UNE SEULE ligne)
 // ============================================================================
-//#define USE_CAMERA        // Utiliser la caméra pour le flux optique
-#define USE_PMW3901       // Utiliser le capteur PMW3901 pour le flux optique
+#define USE_CAMERA        // Utiliser la caméra pour le flux optique
+//#define USE_PMW3901       // Utiliser le capteur PMW3901 pour le flux optique
 
 // ============================================================================
 // SÉLECTION DE LA CAMÉRA (seulement si USE_CAMERA est activé)
 // ============================================================================
 //#define USE_OV2640        // Décommenter pour OV2640 (caméra commune ESP32-CAM)
-//#define USE_OV5640        // Décommenter pour OV5640
+#define USE_OV5640        // Décommenter pour OV5640
 //#define USE_OV7725        // Décommenter pour OV7725 original (PID=0x77)
 
 // ============================================================================
@@ -96,6 +96,11 @@
 #include "drivers/mtf02.h"
 #endif
 
+#ifdef CONFIG_ENABLE_WEBSERVER
+#include "webserver/webserver_ctrl.h"
+#include "nvs_flash.h"
+#endif
+
 static const char *TAG = "OPTICAL_FLOW";
 
 #pragma GCC optimize ("O3")
@@ -157,8 +162,9 @@ static const char *TAG = "OPTICAL_FLOW";
     #define PMW3901_PIN_MOSI   13    // Try swapping MISO/MOSI if getting 0x00
 
     // Paramètres du capteur PMW3901
-    #define PMW3901_FOCAL_LENGTH_PX    42.0f     // FOV de 42°, ~35x35 pixels effectifs
-    #define PMW3901_PIXEL_SIZE_MM      0.030f    // Estimation basée sur FOV
+    // NOTE: FOV = 42° x 42° (30x30 pixels), mais ces valeurs sont pour les calculs de vitesse
+    #define PMW3901_FOCAL_LENGTH_PX    1400.0f   // Longueur focale effective en pixels
+    #define PMW3901_PIXEL_SIZE_MM      0.024f    // Taille pixel physique: 24 µm = 0.024 mm
     #define PMW3901_MAX_DELTA          127       // Valeur maximale de delta (8-bit signé)
     #define PMW3901_FLOW_SCALE         1.0f      // Facteur d'échelle pour le flux
     #define PMW3901_ALPHA 0.1f               // Complementary filter coefficient
@@ -194,7 +200,7 @@ static const char *TAG = "OPTICAL_FLOW";
         #define IMG_WIDTH           160
         #define IMG_HEIGHT          120
         #define CAMERA_FRAME_SIZE   FRAMESIZE_QQVGA
-        #define XCLK_FREQ           20000000    // 20MHz (réduit pour meilleure stabilité I2C)
+        #define XCLK_FREQ           40000000    // 20MHz (réduit pour meilleure stabilité I2C)
         #define FOCAL_LENGTH_PX     40.27f      // À calibrer
         #define PIXEL_SIZE_MM       0.0014f     // 1.4µm
         #define FLOW_SMOOTHING_ALPHA      1.00f // Filtre léger (OV5640 moins bruité)
@@ -283,6 +289,13 @@ static volatile float current_fps = 0.0f;
 
 static QueueHandle_t dataQueue;
 static SemaphoreHandle_t frameMutex;
+
+#ifdef CONFIG_ENABLE_WEBSERVER
+// Webserver state
+static volatile bool webserver_running = false;
+static SemaphoreHandle_t sensorDataMutex = NULL;
+static webserver_sensor_data_t shared_sensor_data = {0};
+#endif
 
 // ============================================================================
 // Calcul checksum
@@ -428,6 +441,26 @@ static esp_err_t init_pmw3901(void)
 #endif  // USE_PMW3901
 
 // ============================================================================
+// Helper function to update webserver data (thread-safe)
+// ============================================================================
+#ifdef CONFIG_ENABLE_WEBSERVER
+static inline void update_webserver_data(const sensor_data_t* data)
+{
+    if (webserver_running && sensorDataMutex) {
+        if (xSemaphoreTake(sensorDataMutex, pdMS_TO_TICKS(1)) == pdTRUE) {
+            shared_sensor_data.timestamp = data->timestamp;
+            shared_sensor_data.velocity_x = data->velocity_x;
+            shared_sensor_data.velocity_y = data->velocity_y;
+            shared_sensor_data.distance = data->distance;
+            shared_sensor_data.lidar_valid = data->lidar_valid;
+            shared_sensor_data.fps = data->fps;
+            xSemaphoreGive(sensorDataMutex);
+        }
+    }
+}
+#endif
+
+// ============================================================================
 // CORE 0: Tâche caméra + flux optique (seulement si USE_CAMERA)
 // ============================================================================
 #ifdef USE_CAMERA
@@ -490,10 +523,14 @@ static void camera_task(void *pvParameters)
                     .lidar_valid = lidar_data.valid,
                     .fps = current_fps
                 };
-                
+
                 xQueueSend(dataQueue, &data, 0);
+
+#ifdef CONFIG_ENABLE_WEBSERVER
+                update_webserver_data(&data);
+#endif
             }
-            
+
             xSemaphoreGive(frameMutex);
         }
         
@@ -582,6 +619,10 @@ static void pmw3901_task(void *pvParameters)
             };
 
             xQueueSend(dataQueue, &data, 0);
+
+#ifdef CONFIG_ENABLE_WEBSERVER
+            update_webserver_data(&data);
+#endif
 
             // Debug output every 50 iterations or when motion detected
             // debug_count++;
@@ -690,6 +731,10 @@ static void mtf02_task(void *pvParameters)
             data.fps = current_fps;
 
             xQueueSend(dataQueue, &data, 0);
+
+#ifdef CONFIG_ENABLE_WEBSERVER
+            update_webserver_data(&data);
+#endif
         }
 
         vTaskDelay(pdMS_TO_TICKS(10));  // ~100 Hz
@@ -894,6 +939,39 @@ void app_main(void)
 #endif
 #ifdef LIDAR_ONLY_MODE
     ESP_LOGI(TAG, "System running with LiDAR only");
+#endif
+
+#ifdef CONFIG_ENABLE_WEBSERVER
+    // Initialize NVS for WiFi
+    esp_err_t ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        ret = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(ret);
+
+    // Create mutex for sensor data sharing
+    sensorDataMutex = xSemaphoreCreateMutex();
+    if (!sensorDataMutex) {
+        ESP_LOGE(TAG, "Failed to create sensor data mutex");
+        return;
+    }
+
+    // Initialize webserver
+    webserver_config_t webserver_cfg = {
+        .sensor_data = &shared_sensor_data,
+        .sensor_mutex = sensorDataMutex,
+        .stream_fps_limit = CONFIG_STREAM_FPS_LIMIT,
+    };
+
+    ESP_ERROR_CHECK(webserver_ctrl_init(&webserver_cfg));
+
+    // Start webserver
+    ESP_LOGI(TAG, "Starting webserver...");
+    webserver_running = true;
+    ESP_ERROR_CHECK(webserver_ctrl_start());
+
+    ESP_LOGI(TAG, "Webserver enabled - WiFi SSID: %s", CONFIG_ESP_WIFI_SSID);
 #endif
 
     ESP_LOGI(TAG, "*** Initialization complete ***");

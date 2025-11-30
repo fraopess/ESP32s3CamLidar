@@ -6,7 +6,10 @@
     ],
     "settings": {
         "files.associations": {
-            "esp_rom_sys.h": "c"
+            "esp_rom_sys.h": "c",
+            "webserver_ctrl.h": "c",
+            "esp_http_server.h": "c",
+            "nvs.h": "c"
         },
         "chat.disableAIFeatures": true
     }

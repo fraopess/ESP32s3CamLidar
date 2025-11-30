@@ -79,7 +79,7 @@ esp_err_t camera_optical_flow_alloc_buffers(int img_width, int img_height, uint8
  */
 void camera_optical_flow_compute(uint8_t* prev, uint8_t* cur, int width, int height, int step,
                                   float min_gradient_threshold, int min_valid_pixels,
-                                  float smoothing_alpha, float* flow_x, float* flow_y);
+                                  float smoothing_alpha, volatile float* flow_x, volatile float* flow_y);
 
 #ifdef __cplusplus
 }

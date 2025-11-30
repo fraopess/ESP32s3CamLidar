@@ -1,14 +1,51 @@
 # put here your custom config value
 menu "Example Configuration"
+
+config ENABLE_WEBSERVER
+    bool "Enable Webserver"
+    default n
+    help
+        Enable WiFi and HTTP webserver for camera streaming and sensor monitoring.
+        When enabled, the ESP32 will connect to WiFi and serve a web interface
+        with live grayscale video stream, sensor data, and camera controls.
+
 config ESP_WIFI_SSID
     string "WiFi SSID"
-    default "myssid"
+    default "Funny_Oak"
+    depends on ENABLE_WEBSERVER
     help
-	SSID (network name) for the example to connect to.
+        SSID (network name) for the example to connect to.
 
 config ESP_WIFI_PASSWORD
     string "WiFi Password"
     default "mypassword"
+    depends on ENABLE_WEBSERVER
     help
-	WiFi password (WPA or WPA2) for the example to use.
+        WiFi password (WPA or WPA2) for the example to use.
+
+config WEBSERVER_PORT
+    int "Webserver Port"
+    default 80
+    range 1 65535
+    depends on ENABLE_WEBSERVER
+    help
+        HTTP server port (default: 80)
+
+config STREAM_FPS_LIMIT
+    int "Maximum Stream FPS"
+    range 5 30
+    default 15
+    depends on ENABLE_WEBSERVER
+    help
+        Limit streaming framerate to balance CPU usage with optical flow processing.
+        Lower values reduce CPU load for optical flow. Recommended: 15 FPS.
+
+config MDNS_HOSTNAME
+    string "mDNS Hostname"
+    default "esp32cam"
+    depends on ENABLE_WEBSERVER
+    help
+        Hostname for mDNS/Bonjour service. Access the webserver using
+        http://<hostname>.local (e.g., http://esp32cam.local)
+
 endmenu

@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>ESP32-S3 Optical Flow Camera</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f0f0f0;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            margin-top: 0;
+        }
+        .main-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        .stream-section, .controls-section, .sensor-section {
+            background-color: #f9f9f9;
+            padding: 15px;
+            border-radius: 5px;
+        }
+        canvas {
+            border: 2px solid #333;
+            background-color: #000;
+            width: 100%;
+            height: auto;
+            image-rendering: pixelated;
+        }
+        .control-group {
+            margin-bottom: 15px;
+        }
+        .control-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #555;
+        }
+        input[type="range"] {
+            width: 100%;
+        }
+        .value-display {
+            display: inline-block;
+            min-width: 40px;
+            text-align: right;
+            font-family: monospace;
+        }
+        .sensor-data {
+            font-family: monospace;
+            font-size: 16px;
+        }
+        .sensor-data div {
+            margin: 10px 0;
+            padding: 8px;
+            background-color: white;
+            border-radius: 3px;
+        }
+        .status {
+            color: #28a745;
+            font-weight: bold;
+        }
+        .status.disconnected {
+            color: #dc3545;
+        }
+        @media (max-width: 768px) {
+            .main-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>ESP32-S3 Optical Flow Camera</h1>
+        <div class="status" id="status">Connecting...</div>
+
+        <div class="main-grid">
+            <div class="stream-section">
+                <h2>Camera Stream</h2>
+                <canvas id="stream-canvas" width="160" height="120"></canvas>
+                <p><small>Grayscale 160x120 @ <span id="stream-fps">--</span> FPS</small></p>
+            </div>
+
+            <div class="sensor-section">
+                <h2>Sensor Data</h2>
+                <div class="sensor-data">
+                    <div>Velocity X: <span id="vel-x">0.000</span> m/s</div>
+                    <div>Velocity Y: <span id="vel-y">0.000</span> m/s</div>
+                    <div>Distance: <span id="distance">0</span> cm</div>
+                    <div>LiDAR: <span id="lidar-status">---</span></div>
+                    <div>Optical Flow FPS: <span id="fps">0.0</span></div>
+                    <div>Free Heap: <span id="heap">0</span> bytes</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="controls-section">
+            <h2>Camera Controls</h2>
+
+            <div class="control-group">
+                <label>Brightness: <span class="value-display" id="brightness-val">0</span></label>
+                <input type="range" id="brightness" min="-2" max="2" value="0" step="1">
+            </div>
+
+            <div class="control-group">
+                <label>Contrast: <span class="value-display" id="contrast-val">0</span></label>
+                <input type="range" id="contrast" min="-2" max="2" value="0" step="1">
+            </div>
+
+            <div class="control-group">
+                <label>Saturation: <span class="value-display" id="saturation-val">0</span></label>
+                <input type="range" id="saturation" min="-2" max="2" value="0" step="1">
+            </div>
+
+            <div class="control-group">
+                <label>AE Level: <span class="value-display" id="ae_level-val">0</span></label>
+                <input type="range" id="ae_level" min="-2" max="2" value="0" step="1">
+            </div>
+
+            <div class="control-group">
+                <label>H-Mirror: <span class="value-display" id="hmirror-val">0</span></label>
+                <input type="range" id="hmirror" min="0" max="1" value="0" step="1">
+            </div>
+
+            <div class="control-group">
+                <label>V-Flip: <span class="value-display" id="vflip-val">0</span></label>
+                <input type="range" id="vflip" min="0" max="1" value="0" step="1">
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Utility: Concatenate Uint8Arrays
+        function concatenateArrays(a, b) {
+            const result = new Uint8Array(a.length + b.length);
+            result.set(a, 0);
+            result.set(b, a.length);
+            return result;
+        }
+
+        // Utility: Find boundary in buffer
+        function findBoundary(buffer, boundary) {
+            const boundaryBytes = new TextEncoder().encode(boundary);
+            for (let i = 0; i <= buffer.length - boundaryBytes.length; i++) {
+                let match = true;
+                for (let j = 0; j < boundaryBytes.length; j++) {
+                    if (buffer[i + j] !== boundaryBytes[j]) {
+                        match = false;
+                        break;
+                    }
+                }
+                if (match) return i;
+            }
+            return -1;
+        }
+
+        // Parse multipart frame headers
+        function parseHeaders(buffer) {
+            const headerText = new TextDecoder().decode(buffer.slice(0, Math.min(200, buffer.length)));
+            const lengthMatch = headerText.match(/Content-Length:\s*(\d+)/i);
+            const widthMatch = headerText.match(/X-Width:\s*(\d+)/i);
+            const heightMatch = headerText.match(/X-Height:\s*(\d+)/i);
+            const headersEnd = headerText.indexOf('\r\n\r\n');
+
+            return {
+                length: lengthMatch ? parseInt(lengthMatch[1]) : null,
+                width: widthMatch ? parseInt(widthMatch[1]) : 160,
+                height: heightMatch ? parseInt(heightMatch[1]) : 120,
+                headersEnd: headersEnd >= 0 ? headersEnd + 4 : null
+            };
+        }
+
+        // Render grayscale data to canvas
+        function renderGrayscale(ctx, grayscaleData, width, height) {
+            const imageData = ctx.createImageData(width, height);
+            const rgba = imageData.data;
+
+            // Convert grayscale to RGBA
+            for (let i = 0; i < grayscaleData.length; i++) {
+                const gray = grayscaleData[i];
+                rgba[i * 4 + 0] = gray;  // R
+                rgba[i * 4 + 1] = gray;  // G
+                rgba[i * 4 + 2] = gray;  // B
+                rgba[i * 4 + 3] = 255;   // A
+            }
+
+            ctx.putImageData(imageData, 0, 0);
+        }
+
+        // Start camera stream
+        async function startStream() {
+            const canvas = document.getElementById('stream-canvas');
+            const ctx = canvas.getContext('2d');
+            let buffer = new Uint8Array(0);
+            let frameCount = 0;
+            let lastFpsUpdate = Date.now();
+
+            try {
+                const response = await fetch('/stream');
+                const reader = response.body.getReader();
+
+                document.getElementById('status').textContent = 'Connected';
+                document.getElementById('status').classList.remove('disconnected');
+
+                while (true) {
+                    const {value, done} = await reader.read();
+                    if (done) break;
+
+                    buffer = concatenateArrays(buffer, value);
+
+                    // Look for frame boundary
+                    const boundary = '\r\n--123456789000000000000987654321\r\n';
+                    const boundaryIndex = findBoundary(buffer, boundary);
+
+                    if (boundaryIndex > 0) {
+                        // Parse headers
+                        const headerData = buffer.slice(boundaryIndex + boundary.length);
+                        const headers = parseHeaders(headerData);
+
+                        if (headers.length && headers.headersEnd) {
+                            const frameStart = boundaryIndex + boundary.length + headers.headersEnd;
+                            const frameEnd = frameStart + headers.length;
+
+                            if (buffer.length >= frameEnd) {
+                                // Extract frame data
+                                const frameData = buffer.slice(frameStart, frameEnd);
+
+                                // Update canvas size if needed
+                                if (canvas.width !== headers.width || canvas.height !== headers.height) {
+                                    canvas.width = headers.width;
+                                    canvas.height = headers.height;
+                                }
+
+                                // Render frame
+                                renderGrayscale(ctx, frameData, headers.width, headers.height);
+
+                                // Update FPS
+                                frameCount++;
+                                const now = Date.now();
+                                if (now - lastFpsUpdate >= 1000) {
+                                    const fps = frameCount / ((now - lastFpsUpdate) / 1000);
+                                    document.getElementById('stream-fps').textContent = fps.toFixed(1);
+                                    frameCount = 0;
+                                    lastFpsUpdate = now;
+                                }
+
+                                // Remove processed data from buffer
+                                buffer = buffer.slice(frameEnd);
+                            }
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error('Stream error:', error);
+                document.getElementById('status').textContent = 'Disconnected';
+                document.getElementById('status').classList.add('disconnected');
+
+                // Retry after 5 seconds
+                setTimeout(startStream, 5000);
+            }
+        }
+
+        // Update sensor data
+        async function updateSensorData() {
+            try {
+                const response = await fetch('/status');
+                const data = await response.json();
+
+                document.getElementById('vel-x').textContent = data.velocity_x.toFixed(3);
+                document.getElementById('vel-y').textContent = data.velocity_y.toFixed(3);
+                document.getElementById('distance').textContent = data.distance;
+                document.getElementById('lidar-status').textContent = data.lidar_valid ? 'Valid' : 'Invalid';
+                document.getElementById('fps').textContent = data.fps.toFixed(1);
+                document.getElementById('heap').textContent = data.free_heap.toLocaleString();
+            } catch (error) {
+                console.error('Status update error:', error);
+            }
+        }
+
+        // Send camera control
+        async function sendControl(name, value) {
+            try {
+                const data = {};
+                data[name] = parseInt(value);
+
+                await fetch('/control', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(data)
+                });
+            } catch (error) {
+                console.error('Control error:', error);
+            }
+        }
+
+        // Setup control handlers
+        function setupControls() {
+            const controls = ['brightness', 'contrast', 'saturation', 'ae_level', 'hmirror', 'vflip'];
+
+            controls.forEach(name => {
+                const slider = document.getElementById(name);
+                const display = document.getElementById(name + '-val');
+
+                slider.addEventListener('input', (e) => {
+                    display.textContent = e.target.value;
+                });
+
+                slider.addEventListener('change', (e) => {
+                    sendControl(name, e.target.value);
+                });
+            });
+        }
+
+        // Initialize on page load
+        window.addEventListener('load', () => {
+            setupControls();
+            startStream();
+            setInterval(updateSensorData, 300);  // Update every 300ms
+        });
+    </script>
+</body>
+</html>

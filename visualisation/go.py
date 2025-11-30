@@ -153,7 +153,14 @@ class OpticalFlowVisualizer:
         self.velocity_y = deque(maxlen=MAX_POINTS)
         self.velocity_mag = deque(maxlen=MAX_POINTS)
         self.distance = deque(maxlen=MAX_POINTS)
-        
+
+        # Position cumulée (intégration de la vitesse)
+        self.position_x = deque(maxlen=MAX_POINTS)
+        self.position_y = deque(maxlen=MAX_POINTS)
+        self.cumul_x = 0.0  # Position actuelle en mètres
+        self.cumul_y = 0.0
+        self.last_time = None  # Pour calcul dt
+
         # Statistiques
         self.start_time_ms = None
         self.data_count = 0
@@ -211,20 +218,31 @@ class OpticalFlowVisualizer:
             # Premier timestamp = référence temps 0
             if self.start_time_ms is None:
                 self.start_time_ms = packet['timestamp_ms']
-            
+
             # Temps relatif en secondes
             rel_time = (packet['timestamp_ms'] - self.start_time_ms) / 1000.0
-            
+
             # Calcul magnitude vitesse
             vel_mag = np.sqrt(packet['velocity_x']**2 + packet['velocity_y']**2)
-            
+
+            # Intégration de la vitesse pour obtenir la position
+            if self.last_time is not None:
+                dt = rel_time - self.last_time
+                if dt > 0 and dt < 1.0:  # Ignorer les deltas aberrants
+                    self.cumul_x += packet['velocity_x'] * dt
+                    self.cumul_y += packet['velocity_y'] * dt
+
+            self.last_time = rel_time
+
             # Ajout aux buffers
             self.times.append(rel_time)
             self.velocity_x.append(packet['velocity_x'])
             self.velocity_y.append(packet['velocity_y'])
             self.velocity_mag.append(vel_mag)
             self.distance.append(packet['distance'])
-            
+            self.position_x.append(self.cumul_x)
+            self.position_y.append(self.cumul_y)
+
             self.data_count += 1
             self.fps_counter += 1
         
@@ -236,7 +254,71 @@ class OpticalFlowVisualizer:
             self.last_fps_calc = now
         
         return len(packets) > 0
-    
+
+    def update_trajectory_plot(self):
+        """Met à jour uniquement le graphique de trajectoire 2D"""
+        pos_x_array = np.array(self.position_x)
+        pos_y_array = np.array(self.position_y)
+        # Prendre les derniers N temps correspondant aux positions
+        if len(self.times) > 0 and len(pos_x_array) > 0:
+            times_list = list(self.times)
+            times_array = np.array(times_list[-len(pos_x_array):])
+        else:
+            times_array = np.array([0])
+
+        self.ax2.clear()
+        if len(pos_x_array) > 0:
+            # Tracer la trajectoire avec couleur basée sur le temps
+            scatter = self.ax2.scatter(pos_x_array, pos_y_array, c=times_array,
+                                       cmap='plasma', s=20, alpha=0.7,
+                                       edgecolors='black', linewidth=0.3)
+            # Tracer les lignes de connexion
+            if len(pos_x_array) > 1:
+                self.ax2.plot(pos_x_array, pos_y_array, 'gray', alpha=0.3, linewidth=1)
+            # Point de départ (vert)
+            self.ax2.scatter(pos_x_array[0], pos_y_array[0], c='green', s=150,
+                           marker='o', edgecolors='darkgreen', linewidth=2,
+                           label='Départ', zorder=5)
+            # Point actuel (rouge)
+            self.ax2.scatter(pos_x_array[-1], pos_y_array[-1], c='red', s=150,
+                           marker='o', edgecolors='darkred', linewidth=2,
+                           label='Position actuelle', zorder=5)
+
+        self.ax2.set_xlabel('Position X (m)', fontsize=10)
+        self.ax2.set_ylabel('Position Y (m)', fontsize=10)
+        self.ax2.set_title('Trajectoire 2D (Intégration Vitesse)', fontsize=11, fontweight='bold')
+        self.ax2.grid(True, alpha=0.3, linestyle='--')
+        self.ax2.axhline(y=0, color='k', linestyle='-', linewidth=0.5)
+        self.ax2.axvline(x=0, color='k', linestyle='-', linewidth=0.5)
+        self.ax2.set_aspect('equal', adjustable='box')
+        self.ax2.legend(fontsize=8, loc='upper right')
+
+    def reset_position(self):
+        """Réinitialise la position cumulée à (0, 0)"""
+        self.cumul_x = 0.0
+        self.cumul_y = 0.0
+        # Vider les buffers de position
+        self.position_x.clear()
+        self.position_y.clear()
+        # Ajouter immédiatement le point d'origine pour éviter le lag
+        if len(self.times) > 0:
+            self.position_x.append(0.0)
+            self.position_y.append(0.0)
+            # Réinitialiser last_time au temps actuel pour éviter les sauts
+            self.last_time = self.times[-1]
+
+        # Forcer la mise à jour immédiate du graphique
+        self.update_trajectory_plot()
+        self.fig.canvas.draw_idle()
+        self.fig.canvas.flush_events()
+
+        print("\n🔄 Position réinitialisée à (0, 0)")
+
+    def on_key_press(self, event):
+        """Gestionnaire d'événements clavier"""
+        if event.key == 'r':
+            self.reset_position()
+
     def init_plot(self):
         """Initialisation des graphiques matplotlib"""
         self.fig = plt.figure(figsize=(15, 10))
@@ -254,13 +336,15 @@ class OpticalFlowVisualizer:
         self.ax1.grid(True, alpha=0.3, linestyle='--')
         self.ax1.axhline(y=0, color='k', linestyle='-', linewidth=0.5, alpha=0.5)
         
-        # Graphique 2: Magnitude vitesse
+        # Graphique 2: Trajectoire 2D (Position X vs Y)
         self.ax2 = self.fig.add_subplot(gs[1, 0])
-        self.line_vmag, = self.ax2.plot([], [], 'g-', linewidth=2)
-        self.ax2.set_ylabel('Magnitude (m/s)', fontsize=10)
-        self.ax2.set_xlabel('Temps (s)', fontsize=10)
-        self.ax2.set_title('Magnitude de la Vitesse', fontsize=11, fontweight='bold')
+        self.ax2.set_xlabel('Position X (m)', fontsize=10)
+        self.ax2.set_ylabel('Position Y (m)', fontsize=10)
+        self.ax2.set_title('Trajectoire 2D (Intégration Vitesse)', fontsize=11, fontweight='bold')
         self.ax2.grid(True, alpha=0.3, linestyle='--')
+        self.ax2.axhline(y=0, color='k', linestyle='-', linewidth=0.5)
+        self.ax2.axvline(x=0, color='k', linestyle='-', linewidth=0.5)
+        self.ax2.set_aspect('equal', adjustable='box')
         
         # Graphique 3: Distance LiDAR
         self.ax3 = self.fig.add_subplot(gs[1, 1])
@@ -283,14 +367,17 @@ class OpticalFlowVisualizer:
         # Graphique 5: Statistiques temps réel
         self.ax5 = self.fig.add_subplot(gs[2, 1])
         self.ax5.axis('off')
-        self.stats_text = self.ax5.text(0.05, 0.95, '', fontsize=10, 
+        self.stats_text = self.ax5.text(0.05, 0.95, '', fontsize=10,
                                         verticalalignment='top',
                                         family='monospace',
-                                        bbox=dict(boxstyle='round', 
-                                                facecolor='lightblue', 
+                                        bbox=dict(boxstyle='round',
+                                                facecolor='lightblue',
                                                 alpha=0.8,
                                                 edgecolor='navy',
                                                 linewidth=2))
+
+        # Connecter le gestionnaire d'événements clavier
+        self.fig.canvas.mpl_connect('key_press_event', self.on_key_press)
         
     def update_plot(self, frame):
         """Mise à jour des graphiques (appelée par FuncAnimation)"""
@@ -307,17 +394,17 @@ class OpticalFlowVisualizer:
         vy_array = np.array(self.velocity_y)
         vmag_array = np.array(self.velocity_mag)
         dist_array = np.array(self.distance)
-        
+        pos_x_array = np.array(self.position_x)
+        pos_y_array = np.array(self.position_y)
+
         # Mise à jour vitesse X et Y
         self.line_vx.set_data(times_array, vx_array)
         self.line_vy.set_data(times_array, vy_array)
         self.ax1.relim()
         self.ax1.autoscale_view()
-        
-        # Mise à jour magnitude
-        self.line_vmag.set_data(times_array, vmag_array)
-        self.ax2.relim()
-        self.ax2.autoscale_view()
+
+        # Mise à jour trajectoire 2D (Position)
+        self.update_trajectory_plot()
         
         # Mise à jour distance
         self.line_dist.set_data(times_array, dist_array)
@@ -361,6 +448,13 @@ class OpticalFlowVisualizer:
         stats += f"  • Vy moyen: {np.mean(vy_array):+.4f} m/s\n"
         stats += f"  • Magnitude moy: {np.mean(vmag_array):.4f} m/s\n"
         stats += f"  • Magnitude max: {np.max(vmag_array):.4f} m/s\n\n"
+
+        stats += f"📍 Position (intégration):\n"
+        stats += f"  • X actuel: {self.cumul_x:+.3f} m\n"
+        stats += f"  • Y actuel: {self.cumul_y:+.3f} m\n"
+        distance_from_origin = np.sqrt(self.cumul_x**2 + self.cumul_y**2)
+        stats += f"  • Distance origine: {distance_from_origin:.3f} m\n"
+        stats += f"  • [Touche R] pour reset\n\n"
         
         if len(valid_distances) > 0:
             stats += f"📏 Distance LiDAR:\n"
@@ -395,7 +489,9 @@ class OpticalFlowVisualizer:
         print("✓ Visualisation démarrée")
         print(f"  Format paquet: {PACKET_SIZE} bytes")
         print(f"  Affichage: {MAX_POINTS} points max")
-        print("\nAppuyez sur Ctrl+C pour arrêter")
+        print("\n🎮 Contrôles:")
+        print("  • Touche [R] : Réinitialiser la position cumulée")
+        print("  • Ctrl+C : Arrêter la visualisation")
         print("="*60 + "\n")
         
         # Animation matplotlib (mise à jour toutes les 50ms)
