@@ -224,18 +224,30 @@
             return -1;
         }
 
-        // Parse multipart frame headers
+        // Parse multipart frame headers (includes sensor data)
         function parseHeaders(buffer) {
-            const headerText = new TextDecoder().decode(buffer.slice(0, Math.min(200, buffer.length)));
+            const headerText = new TextDecoder().decode(buffer.slice(0, Math.min(512, buffer.length)));
             const lengthMatch = headerText.match(/Content-Length:\s*(\d+)/i);
             const widthMatch = headerText.match(/X-Width:\s*(\d+)/i);
             const heightMatch = headerText.match(/X-Height:\s*(\d+)/i);
+            const distMatch = headerText.match(/X-Dist:\s*(\d+)/i);
+            const validMatch = headerText.match(/X-Valid:\s*(\d+)/i);
+            const velXMatch = headerText.match(/X-VelX:\s*([-\d.]+)/i);
+            const velYMatch = headerText.match(/X-VelY:\s*([-\d.]+)/i);
+            const fpsMatch = headerText.match(/X-Fps:\s*([\d.]+)/i);
+            const heapMatch = headerText.match(/X-Heap:\s*(\d+)/i);
             const headersEnd = headerText.indexOf('\r\n\r\n');
 
             return {
                 length: lengthMatch ? parseInt(lengthMatch[1]) : null,
                 width: widthMatch ? parseInt(widthMatch[1]) : 160,
                 height: heightMatch ? parseInt(heightMatch[1]) : 120,
+                distance: distMatch ? parseInt(distMatch[1]) : 0,
+                lidar_valid: validMatch ? parseInt(validMatch[1]) : 0,
+                velocity_x: velXMatch ? parseFloat(velXMatch[1]) : 0,
+                velocity_y: velYMatch ? parseFloat(velYMatch[1]) : 0,
+                fps: fpsMatch ? parseFloat(fpsMatch[1]) : 0,
+                free_heap: heapMatch ? parseInt(heapMatch[1]) : 0,
                 headersEnd: headersEnd >= 0 ? headersEnd + 4 : null
             };
         }
@@ -311,12 +323,22 @@
                                 // Render frame
                                 renderGrayscale(ctx, frameData, headers.width, headers.height);
 
-                                // Update FPS
+                                // Update sensor data from stream headers
+                                document.getElementById('vel-x').textContent = headers.velocity_x.toFixed(3);
+                                document.getElementById('vel-y').textContent = headers.velocity_y.toFixed(3);
+                                document.getElementById('distance').textContent = headers.distance;
+                                document.getElementById('lidar-status').textContent = headers.lidar_valid ? 'Valid' : 'Invalid';
+                                document.getElementById('fps').textContent = headers.fps.toFixed(1);
+                                document.getElementById('frame-size').textContent = headers.width + 'x' + headers.height;
+                                document.getElementById('heap').textContent = headers.free_heap.toLocaleString();
+
+                                // Update stream FPS
                                 frameCount++;
                                 const now = Date.now();
                                 if (now - lastFpsUpdate >= 1000) {
                                     const fps = frameCount / ((now - lastFpsUpdate) / 1000);
                                     document.getElementById('stream-fps').textContent = fps.toFixed(1);
+                                    document.getElementById('stream-fps-actual').textContent = fps.toFixed(0);
                                     frameCount = 0;
                                     lastFpsUpdate = now;
                                 }
@@ -447,7 +469,7 @@
         window.addEventListener('load', () => {
             setupControls();
             startStream();
-            setInterval(updateSensorData, 1000);  // Update every 1000ms (1 second)
+            // Sensor data now received via stream headers - no separate polling needed
 
             // Add frame size change handler
             document.getElementById('framesize').addEventListener('change', (e) => {

@@ -194,9 +194,12 @@ void dts6012m_read(uart_port_t uart_num, volatile dts6012m_data_t* data, uint16_
         }
     }
 
-    // Statistics output every 1 second
+    // Statistics output every 2 seconds
     int64_t current_time = esp_timer_get_time();
-    if (current_time - last_debug_time >= 1000000) {
+    if (current_time - last_debug_time >= 2000000) {
+        ESP_LOGI(TAG, "UART: %d bytes, %d packets | dist=%u cm, strength=%u, valid=%d",
+                 bytes_received_total, packets_parsed,
+                 data->distance, data->strength, data->valid);
         bytes_received_total = 0;
         packets_parsed = 0;
         last_debug_time = current_time;

@@ -18,7 +18,7 @@
 #include "soc/lcd_cam_struct.h"
 #include "soc/lcd_cam_reg.h"
 #include "soc/gdma_struct.h"
-#include "hal/gdma_periph.h"
+#include "soc/gdma_periph.h"
 #include "soc/gdma_reg.h"
 #include "hal/clk_gate_ll.h"
 #include "esp_private/gdma.h"

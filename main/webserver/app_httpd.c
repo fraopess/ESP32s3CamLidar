@@ -64,7 +64,18 @@ esp_err_t camera_optical_flow_realloc_buffers(int width, int height,
 #define PART_BOUNDARY "123456789000000000000987654321"
 static const char* _STREAM_CONTENT_TYPE = "multipart/x-mixed-replace;boundary=" PART_BOUNDARY;
 static const char* _STREAM_BOUNDARY = "\r\n--" PART_BOUNDARY "\r\n";
-static const char* _STREAM_PART = "Content-Type: application/octet-stream\r\nContent-Length: %u\r\nX-Width: %d\r\nX-Height: %d\r\n\r\n";
+// Stream part headers now include sensor data (avoids needing separate /status requests)
+static const char* _STREAM_PART = "Content-Type: application/octet-stream\r\n"
+    "Content-Length: %u\r\n"
+    "X-Width: %d\r\n"
+    "X-Height: %d\r\n"
+    "X-Dist: %u\r\n"
+    "X-Valid: %d\r\n"
+    "X-VelX: %.3f\r\n"
+    "X-VelY: %.3f\r\n"
+    "X-Fps: %.1f\r\n"
+    "X-Heap: %lu\r\n"
+    "\r\n";
 
 /**
  * Handler for GET / - Root index page
@@ -87,7 +98,7 @@ static esp_err_t stream_handler(httpd_req_t *req)
     camera_fb_t *fb = NULL;
     esp_err_t res = ESP_OK;
     size_t _jpg_buf_len = 0;
-    char part_buf[128];
+    char part_buf[256];
 
     ESP_LOGI(TAG, "Stream session started");
 
@@ -152,9 +163,21 @@ static esp_err_t stream_handler(httpd_req_t *req)
             break;
         }
 
-        // Send headers with frame metadata
-        size_t hlen = snprintf((char *)part_buf, 128, _STREAM_PART,
-                              _jpg_buf_len, fb->width, fb->height);
+        // Read sensor data for this frame's headers
+        webserver_sensor_data_t sdata = {0};
+        if (g_sensor_mutex && xSemaphoreTake(g_sensor_mutex, pdMS_TO_TICKS(1)) == pdTRUE) {
+            if (g_sensor_data) {
+                memcpy(&sdata, g_sensor_data, sizeof(webserver_sensor_data_t));
+            }
+            xSemaphoreGive(g_sensor_mutex);
+        }
+
+        // Send headers with frame metadata + sensor data
+        size_t hlen = snprintf((char *)part_buf, sizeof(part_buf), _STREAM_PART,
+                              _jpg_buf_len, fb->width, fb->height,
+                              sdata.distance, sdata.lidar_valid,
+                              sdata.velocity_x, sdata.velocity_y,
+                              sdata.fps, esp_get_free_heap_size());
         res = httpd_resp_send_chunk(req, (const char *)part_buf, hlen);
         if (res != ESP_OK) {
             ESP_LOGE(TAG, "Failed to send headers (frame %d), err=0x%x (%d)",
@@ -201,6 +224,7 @@ static esp_err_t status_handler(httpd_req_t *req)
 {
     char json_response[256];
     webserver_sensor_data_t data = {0};
+    static uint32_t status_req_count = 0;
 
     // Read sensor data (thread-safe)
     if (g_sensor_mutex && xSemaphoreTake(g_sensor_mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
@@ -208,6 +232,12 @@ static esp_err_t status_handler(httpd_req_t *req)
             memcpy(&data, g_sensor_data, sizeof(webserver_sensor_data_t));
         }
         xSemaphoreGive(g_sensor_mutex);
+    }
+
+    status_req_count++;
+    if (status_req_count % 10 == 1) {
+        ESP_LOGI(TAG, "/status[%lu]: dist=%u valid=%d fps=%.1f",
+                 status_req_count, data.distance, data.lidar_valid, data.fps);
     }
 
     // Get free heap for debugging

@@ -488,6 +488,8 @@ static esp_err_t init_pmw3901(void)
 #ifdef CONFIG_ENABLE_WEBSERVER
 static inline void update_webserver_data(const sensor_data_t* data)
 {
+    static uint32_t update_count = 0;
+
     if (webserver_running && sensorDataMutex) {
         if (xSemaphoreTake(sensorDataMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
             shared_sensor_data.timestamp = data->timestamp;
@@ -497,8 +499,20 @@ static inline void update_webserver_data(const sensor_data_t* data)
             shared_sensor_data.lidar_valid = data->lidar_valid;
             shared_sensor_data.fps = data->fps;
             xSemaphoreGive(sensorDataMutex);
+
+            update_count++;
+            if (update_count % 500 == 1) {
+                ESP_LOGI(TAG, "Webserver data updated [%lu]: dist=%u valid=%d fps=%.1f",
+                         update_count, data->distance, data->lidar_valid, data->fps);
+            }
         } else {
             ESP_LOGW(TAG, "Failed to acquire sensor mutex for webserver update");
+        }
+    } else if (update_count == 0) {
+        static uint32_t skip_count = 0;
+        if (++skip_count % 500 == 1) {
+            ESP_LOGW(TAG, "Webserver data skip: running=%d mutex=%p",
+                     webserver_running, sensorDataMutex);
         }
     }
 }
@@ -911,6 +925,12 @@ static void lidar_serial_task(void *pvParameters)
             send_binary_packet(timestamp_ms, data.velocity_x, data.velocity_y,
                              data.lidar_valid ? data.distance : 0);
 #endif
+            packets_sent++;
+            if (packets_sent % 200 == 0) {
+                ESP_LOGI(TAG, "TX[%d] vx=%.3f vy=%.3f dist=%u valid=%d fps=%.1f",
+                         packets_sent, data.velocity_x, data.velocity_y,
+                         data.distance, data.lidar_valid, data.fps);
+            }
         }
 
         vTaskDelay(pdMS_TO_TICKS(1));
