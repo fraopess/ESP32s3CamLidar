@@ -64,6 +64,18 @@ esp_err_t camera_optical_flow_init(const camera_config_optical_flow_t* config);
 esp_err_t camera_optical_flow_alloc_buffers(int img_width, int img_height, uint8_t** img_prev, uint8_t** img_cur);
 
 /**
+ * @brief Reallocate memory for image buffers (for dynamic frame size changes)
+ *
+ * @param img_width New image width
+ * @param img_height New image height
+ * @param img_prev Pointer to previous image buffer (will be freed and reallocated)
+ * @param img_cur Pointer to current image buffer (will be freed and reallocated)
+ * @return ESP error code
+ */
+esp_err_t camera_optical_flow_realloc_buffers(int img_width, int img_height,
+                                               uint8_t** img_prev, uint8_t** img_cur);
+
+/**
  * @brief Compute optical flow using Lucas-Kanade algorithm
  *
  * @param prev Previous image buffer

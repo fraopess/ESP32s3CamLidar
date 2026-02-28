@@ -92,6 +92,37 @@ esp_err_t camera_optical_flow_alloc_buffers(int img_width, int img_height, uint8
 }
 
 // ============================================================================
+// Reallocate memory for image buffers (for dynamic frame size changes)
+// ============================================================================
+esp_err_t camera_optical_flow_realloc_buffers(int img_width, int img_height,
+                                               uint8_t** img_prev, uint8_t** img_cur)
+{
+    // Free existing buffers
+    if (*img_prev) {
+        heap_caps_free(*img_prev);
+        *img_prev = NULL;
+    }
+    if (*img_cur) {
+        heap_caps_free(*img_cur);
+        *img_cur = NULL;
+    }
+
+    // Allocate new buffers
+    size_t buffer_size = img_width * img_height;
+    *img_prev = (uint8_t *)heap_caps_malloc(buffer_size, MALLOC_CAP_SPIRAM);
+    *img_cur = (uint8_t *)heap_caps_malloc(buffer_size, MALLOC_CAP_SPIRAM);
+
+    if (!(*img_prev) || !(*img_cur)) {
+        ESP_LOGE(TAG, "Failed to allocate buffers for %dx%d", img_width, img_height);
+        return ESP_ERR_NO_MEM;
+    }
+
+    ESP_LOGI(TAG, "Reallocated buffers: %dx%d = %zu bytes each",
+             img_width, img_height, buffer_size);
+    return ESP_OK;
+}
+
+// ============================================================================
 // Compute optical flow using Lucas-Kanade
 // ============================================================================
 void camera_optical_flow_compute(uint8_t* prev, uint8_t* cur, int width, int height, int step,

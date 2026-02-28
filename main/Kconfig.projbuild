@@ -33,12 +33,12 @@ config WEBSERVER_PORT
 
 config STREAM_FPS_LIMIT
     int "Maximum Stream FPS"
-    range 5 30
-    default 15
+    range 5 60
+    default 30
     depends on ENABLE_WEBSERVER
     help
-        Limit streaming framerate to balance CPU usage with optical flow processing.
-        Lower values reduce CPU load for optical flow. Recommended: 15 FPS.
+        Limit streaming framerate. Higher values provide smoother video.
+        Recommended: 30 FPS for balance, 60 FPS for maximum performance.
 
 config MDNS_HOSTNAME
     string "mDNS Hostname"

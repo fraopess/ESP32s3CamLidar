@@ -13,6 +13,11 @@
 //#define USE_PMW3901       // Utiliser le capteur PMW3901 pour le flux optique
 
 // ============================================================================
+// TRANSMISSION BINAIRE (commenter pour désactiver)
+// ============================================================================
+//#define SEND_BINARY       // Comment this line to disable binary transmission over UART
+
+// ============================================================================
 // SÉLECTION DE LA CAMÉRA (seulement si USE_CAMERA est activé)
 // ============================================================================
 //#define USE_OV2640        // Décommenter pour OV2640 (caméra commune ESP32-CAM)
@@ -253,12 +258,29 @@ typedef struct {
     float fps;
 } sensor_data_t;
 
+// Runtime optical flow configuration
+typedef struct {
+    float min_gradient_threshold;
+    int min_valid_pixels;
+    float flow_smoothing_alpha;
+    int optical_flow_step;
+    float focal_length_px;
+    float pixel_size_mm;
+} optical_flow_config_t;
+
+// Runtime frame size configuration
+typedef struct {
+    int width;
+    int height;
+    framesize_t framesize;
+} frame_config_t;
+
 // ============================================================================
 // Variables globales
 // ============================================================================
 #ifdef USE_CAMERA
-static uint8_t *img_prev = NULL;
-static uint8_t *img_cur = NULL;
+uint8_t *img_prev = NULL;
+uint8_t *img_cur = NULL;
 static bool first_frame = true;
 #endif
 
@@ -270,6 +292,26 @@ static volatile float global_flow_x = 0.0f;
 static volatile float global_flow_y = 0.0f;
 static volatile float filtered_flow_x = 0.0f;
 static volatile float filtered_flow_y = 0.0f;
+
+// Runtime optical flow configuration (initialized with default values)
+optical_flow_config_t of_config = {
+    .min_gradient_threshold = MIN_GRADIENT_THRESHOLD,
+    .min_valid_pixels = MIN_VALID_PIXELS,
+    .flow_smoothing_alpha = FLOW_SMOOTHING_ALPHA,
+    .optical_flow_step = OPTICAL_FLOW_STEP,
+    .focal_length_px = FOCAL_LENGTH_PX,
+    .pixel_size_mm = PIXEL_SIZE_MM,
+};
+SemaphoreHandle_t of_config_mutex = NULL;
+
+// Runtime frame size configuration (initialized with defaults)
+frame_config_t frame_config = {
+    .width = IMG_WIDTH,
+    .height = IMG_HEIGHT,
+    .framesize = CAMERA_FRAME_SIZE
+};
+SemaphoreHandle_t frame_config_mutex = NULL;
+bool camera_task_suspended = false;
 
 #ifdef USE_TFMINI
 static volatile tfmini_data_t lidar_data = {0, 0, false};
@@ -447,7 +489,7 @@ static esp_err_t init_pmw3901(void)
 static inline void update_webserver_data(const sensor_data_t* data)
 {
     if (webserver_running && sensorDataMutex) {
-        if (xSemaphoreTake(sensorDataMutex, pdMS_TO_TICKS(1)) == pdTRUE) {
+        if (xSemaphoreTake(sensorDataMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
             shared_sensor_data.timestamp = data->timestamp;
             shared_sensor_data.velocity_x = data->velocity_x;
             shared_sensor_data.velocity_y = data->velocity_y;
@@ -455,6 +497,8 @@ static inline void update_webserver_data(const sensor_data_t* data)
             shared_sensor_data.lidar_valid = data->lidar_valid;
             shared_sensor_data.fps = data->fps;
             xSemaphoreGive(sensorDataMutex);
+        } else {
+            ESP_LOGW(TAG, "Failed to acquire sensor mutex for webserver update");
         }
     }
 }
@@ -467,15 +511,37 @@ static inline void update_webserver_data(const sensor_data_t* data)
 static void camera_task(void *pvParameters)
 {
     ESP_LOGI(TAG, "Camera task started on core %d", xPortGetCoreID());
-    
+
     while (1) {
+        // Check if task should be suspended for frame size change
+        if (camera_task_suspended) {
+            vTaskDelay(pdMS_TO_TICKS(50));
+            continue;
+        }
+
+        // Get current frame config
+        frame_config_t frame_cfg_copy;
+        if (frame_config_mutex && xSemaphoreTake(frame_config_mutex, pdMS_TO_TICKS(1)) == pdTRUE) {
+            memcpy(&frame_cfg_copy, &frame_config, sizeof(frame_config_t));
+            xSemaphoreGive(frame_config_mutex);
+        } else {
+            frame_cfg_copy = frame_config;  // Use cached value if can't acquire
+        }
+
         camera_fb_t *fb = esp_camera_fb_get();
         if (!fb) {
+            static uint32_t fail_count = 0;
+            if (++fail_count % 100 == 0) {
+                ESP_LOGE(TAG, "Camera capture failed %lu times", fail_count);
+            }
             vTaskDelay(pdMS_TO_TICKS(5));
             continue;
         }
-        
-        if (fb->len != IMG_WIDTH * IMG_HEIGHT) {
+
+        // Validate frame size against current config
+        if (fb->len != frame_cfg_copy.width * frame_cfg_copy.height) {
+            ESP_LOGW(TAG, "Invalid frame size: expected %d, got %zu",
+                     frame_cfg_copy.width * frame_cfg_copy.height, fb->len);
             esp_camera_fb_return(fb);
             continue;
         }
@@ -488,9 +554,22 @@ static void camera_task(void *pvParameters)
                 memcpy(img_prev, fb->buf, fb->len);
                 first_frame = false;
             } else {
+                // Get current optical flow configuration
+                optical_flow_config_t config_copy;
+                if (of_config_mutex && xSemaphoreTake(of_config_mutex, pdMS_TO_TICKS(1)) == pdTRUE) {
+                    memcpy(&config_copy, &of_config, sizeof(optical_flow_config_t));
+                    xSemaphoreGive(of_config_mutex);
+                } else {
+                    // Use defaults if can't acquire mutex
+                    config_copy = of_config;
+                }
+
                 memcpy(img_cur, fb->buf, fb->len);
-                camera_optical_flow_compute(img_prev, img_cur, IMG_WIDTH, IMG_HEIGHT, OPTICAL_FLOW_STEP,
-                                           MIN_GRADIENT_THRESHOLD, MIN_VALID_PIXELS, FLOW_SMOOTHING_ALPHA,
+                camera_optical_flow_compute(img_prev, img_cur, frame_cfg_copy.width, frame_cfg_copy.height,
+                                           config_copy.optical_flow_step,
+                                           config_copy.min_gradient_threshold,
+                                           config_copy.min_valid_pixels,
+                                           config_copy.flow_smoothing_alpha,
                                            &global_flow_x, &global_flow_y);
                 memcpy(img_prev, img_cur, fb->len);
                 
@@ -508,11 +587,11 @@ static void camera_task(void *pvParameters)
                 if (lidar_data.valid && current_fps > 1.0f) {
                     float distance_m = lidar_data.distance / 100.0f;
                     float dt = 1.0f / current_fps;
-                    
-                    velocity_x = (global_flow_x * distance_m * PIXEL_SIZE_MM * 1000.0f) / 
-                                 (FOCAL_LENGTH_PX * dt);
-                    velocity_y = (global_flow_y * distance_m * PIXEL_SIZE_MM * 1000.0f) / 
-                                 (FOCAL_LENGTH_PX * dt);
+
+                    velocity_x = (global_flow_x * distance_m * config_copy.pixel_size_mm * 1000.0f) /
+                                 (config_copy.focal_length_px * dt);
+                    velocity_y = (global_flow_y * distance_m * config_copy.pixel_size_mm * 1000.0f) /
+                                 (config_copy.focal_length_px * dt);
                 }
                 
                 sensor_data_t data = {
@@ -524,7 +603,12 @@ static void camera_task(void *pvParameters)
                     .fps = current_fps
                 };
 
-                xQueueSend(dataQueue, &data, 0);
+                if (xQueueSend(dataQueue, &data, 0) != pdTRUE) {
+                    static uint32_t drop_count = 0;
+                    if (++drop_count % 100 == 0) {
+                        ESP_LOGW(TAG, "Data queue full, dropped %lu packets", drop_count);
+                    }
+                }
 
 #ifdef CONFIG_ENABLE_WEBSERVER
                 update_webserver_data(&data);
@@ -794,8 +878,10 @@ static void lidar_serial_task(void *pvParameters)
             // }
 
             uint32_t timestamp_ms = (uint32_t)(data.timestamp / 1000);
+#ifdef SEND_BINARY
             send_binary_packet(timestamp_ms, data.velocity_x, data.velocity_y,
                              data.lidar_valid ? data.distance : 0);
+#endif
             // packets_sent++;
 
             // if (packets_sent % 100 == 0) {
@@ -812,15 +898,19 @@ static void lidar_serial_task(void *pvParameters)
             int64_t timestamp = esp_timer_get_time();
             uint32_t timestamp_ms = (uint32_t)(timestamp / 1000);
             // Envoyer uniquement les données LiDAR, vitesse = 0
+#ifdef SEND_BINARY
             send_binary_packet(timestamp_ms, 0.0f, 0.0f, lidar_data.distance);
+#endif
         }
         vTaskDelay(pdMS_TO_TICKS(10));  // ~100 Hz pour LiDAR seul
 #else
         // Mode avec flux optique
         if (xQueueReceive(dataQueue, &data, pdMS_TO_TICKS(10)) == pdTRUE) {
             uint32_t timestamp_ms = (uint32_t)(data.timestamp / 1000);
+#ifdef SEND_BINARY
             send_binary_packet(timestamp_ms, data.velocity_x, data.velocity_y,
                              data.lidar_valid ? data.distance : 0);
+#endif
         }
 
         vTaskDelay(pdMS_TO_TICKS(1));
@@ -954,6 +1044,20 @@ void app_main(void)
     sensorDataMutex = xSemaphoreCreateMutex();
     if (!sensorDataMutex) {
         ESP_LOGE(TAG, "Failed to create sensor data mutex");
+        return;
+    }
+
+    // Create mutex for optical flow configuration
+    of_config_mutex = xSemaphoreCreateMutex();
+    if (!of_config_mutex) {
+        ESP_LOGE(TAG, "Failed to create optical flow config mutex");
+        return;
+    }
+
+    // Create mutex for frame size configuration
+    frame_config_mutex = xSemaphoreCreateMutex();
+    if (!frame_config_mutex) {
+        ESP_LOGE(TAG, "Failed to create frame config mutex");
         return;
     }
 
